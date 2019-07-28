@@ -8,6 +8,7 @@ setwd("/GitDev/Footyapp/data/") # use here function instead
 footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
 
 footy_match <- footy %>% filter(gameID == "-LklLiQLB8ze2uy6wHZr")
+footy_match <- footy %>% filter(ourName == " Socceroos")
 
 kickoff = FALSE
 prevPlayNumber = 0
@@ -106,11 +107,9 @@ for (i in 1:nrow(footy_match)) {
            footy_match[i, ]$oppositionPhase = "BP"
          } 
          
-       } else if (footy_match[i, ]$adjEventName == "offside") {
-         
-       } else if (footy_match[i, ]$adjEventName == "indirect freekick") {
-         
-       } else if (footy_match[i, ]$adjEventName == "direct freekick") {
+       } else if (footy_match[i, ]$adjEventName %in% c("offside", "direct freekick", "indirect freekick")) {
+         footy_match[i, ]$playNumber = prevPlayNumber
+         footy_match[i, ]$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
          
        } else if (footy_match[i-1, ]$adjEventName == "goal" &
                   footy_match[i, ]$adjEventName == "first touch") {
@@ -128,7 +127,7 @@ for (i in 1:nrow(footy_match)) {
          footy_match[i, ]$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
          footy_match[i, ]$playNumber = prevPlayNumber
          footy_match[i, ]$usPhase = footy_match[i-1, ]$usPhase
-         footy_match[i, ]$oppositionPhase = footy_match[i, ]$oppositionPhase
+         footy_match[i, ]$oppositionPhase = footy_match[i-1, ]$oppositionPhase
           
        # turnover ball
        } else {
@@ -141,6 +140,7 @@ for (i in 1:nrow(footy_match)) {
          footy_extra$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
          footy_extra$usPhase = footy_match[i-1, ]$usPhase
          footy_extra$oppositionPhase = footy_match[i-1, ]$oppositionPhase
+         footy_extra$adjEventName = "turnover"
          
          footy_match <- rbind(footy_match, footy_extra)
 
@@ -163,7 +163,8 @@ for (i in 1:nrow(footy_match)) {
   # and track previous play number
   if (footy_match[i, ]$playNumber > 0) {
     if (footy_match[i, ]$byUs == footy_match[i+1, ]$byUs &
-        footy_match[i, ]$adjEventName %in% c("throw in", "dribble", "kick off", "first touch") &
+        footy_match[i, ]$adjEventName %in% c("throw in", "dribble", "kick off", "first touch", 
+                                             "goal kick", "keeper punt", "corner kick") &
         footy_match[i+1, ]$adjEventName %in% c("first touch")) {
       footy_match[i, ]$adjPass = 1
     }
@@ -180,3 +181,6 @@ for (i in 1:nrow(footy_match)) {
   
 }
 
+table(footy_match$byUs, footy_match$adjPass)
+table(footy_match$byUs, ifelse(footy_match$pass == "true" &
+                                 footy_match$pseudoEvent == FALSE, 1, 0))
