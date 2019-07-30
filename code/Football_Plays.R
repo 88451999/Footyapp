@@ -9,6 +9,7 @@ footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
 
 footy_match <- footy %>% filter(gameID == "-LklLiQLB8ze2uy6wHZr")
 footy_match <- footy %>% filter(ourName == " Socceroos")
+footy_match <- footy
 
 kickoff = FALSE
 prevPlayNumber = 0
@@ -257,6 +258,17 @@ footy_match_play <- footy_match %>% #filter(playNumber == 1) %>%
             oppositionPhase = first(oppositionPhase),
             totalPasses = sum(adjPass))
 
+errors <- footy_match %>% filter(pseudoEvent == FALSE & eventName == "dribble") %>%
+  group_by(competition, ourName, theirName, gameID) %>%
+  summarise(adjustments = sum(ifelse(eventName == "dribble" & adjEventName == "first touch", 1, 0)),
+            numDribble = n(),
+            chgPcnt = adjustments/numDribble,
+            startTime = min(time))
+
+nrow(footy_match %>% filter(pseudoEvent == FALSE & eventName == "dribble" &
+                              adjEventName == "first touch")) /
+  nrow(footy_match %>% filter(pseudoEvent == FALSE & eventName == "dribble"))
+                              )
 footy_throwin <- footy_match_play %>% filter(firstEvent == "corner kick")
 table(footy_throwin$byUs, footy_throwin$numSequences)
 
