@@ -10,12 +10,13 @@ library(ggmap)
 library(tmap)
 library(adehabitatHR)
 library(raster)
-library
+
 
 FootyGames <- FootyGames %>% group_by(gameID, byUs, playNumber) %>%
   mutate(maxSeq = max(sequenceNumber), 
          playByUs = first(byUs))
-footy_pass <- FootyGames %>% filter(competition == "2019 Icc Football Mens Open" & 
+footy_pass <- FootyGames %>% filter(gameID == "-LlKBtky-O-yxKntBlx9" &
+  #competition == "2019 Icc Football Mens Open" & 
                                  #   theirName == "Hornsby Heights" & 
                                       playByUs == "false" & #sequenceNumber == 1 &
                    adjEventName %in% c("first touch", "kickoff",
@@ -42,6 +43,7 @@ as.data.frame(data)
 plot(spdf)
 spplot(spdf)
 
+tm_shape(Ps1) + tm_borders() +
 tm_shape(spdf) +
   tm_dots(col="adjEventName")
 
@@ -50,15 +52,25 @@ tm_shape(spdf) +
 #convert our kernel density map to a raster object
 kde <- raster(kde.output)
 # set the coordinate projection of our object to British National Grid (the one we have been using all along)
-projection(kde) <- CRS("+init=EPSG:27700")
+projection(kde) <- CRS("+init=EPSG:4326")
 #map it!
 tm_shape(kde) + tm_raster("ud")
 
-masked_kde <- mask(kde, Output.Areas)
+masked_kde <- mask(kde, Ps1)
 plot(masked_kde) # a quick sanity check!
-
+library(tmaptools) 
+# provides a set of tools for processing spatial data
+# creates a bounding box based on the extents of the Output.Areas polygon (to make our map smaller)
+bounding_box <- bb(Ps1)
+# maps the raster within the bounding box
+tm_shape(masked_kde, bbox = bounding_box) + tm_raster("ud")
 coordinates(spdf)
 proj4string(spdf)  
+
+tm_shape(masked_kde, bbox = bounding_box) + tm_raster("ud", style = "quantile", n = 100, legend.show = FALSE, palette = "YlGnBu") +
+  tm_shape(Ps1) + tm_borders(alpha=.3, col = "white") +
+  tm_layout(frame = FALSE)
+
 
 # Generate data
 pp <- function (n,r=4) {
@@ -185,4 +197,4 @@ coords = matrix(c(0, 0,
 
 P1 = Polygon(coords)
 Ps1 = SpatialPolygons(list(Polygons(list(P1), ID = "a")) )#, proj4string=CRS("+proj=longlat +ellps=WGS84 +datum=WGS84 +no_defs"))
-plot(Ps1, axes = TRUE)
+plot(Ps1, axes = FALSE)

@@ -7,7 +7,7 @@ library(zoo)
 setwd("/GitDev/Footyapp/data/") # use here function instead
 footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
 
-footy_match <- footy %>% filter(gameID == "-LklLiQLB8ze2uy6wHZr")
+#footy <- footy %>% filter(gameID == "-LklLiQLB8ze2uy6wHZr")
 #footy_match <- footy %>% filter(ourName == " Socceroos")
 #footy_match <- footy
 games = unique(footy$gameID)
@@ -97,7 +97,27 @@ for (j in 1:length(games)) {
              footy_match[i, ]$oppositionPhase = "BP"
            } 
          } else if (footy_match[i, ]$adjEventName == "keeper") {
-  
+           # first touch is outside the penalty area so punt has been missed
+           # Insert a kick..
+             if ((footy_match[i+1, ]$lengthMetres > 16.5 |
+                 footy_match[i+1, ]$widthMetres > (75 - 17.34) |
+                 footy_match[i+1, ]$widthMetres < 17.34) &
+                 !(footy_match[i+1, ]$adjEventName %in% c("change ends", "finish")) ) {
+
+                 # Put in an end marker for this play when there is a turnover
+               footy_match[i, ]$playNumber = prevPlayNumber + 1
+               footy_match[i, ]$sequenceNumber = 1
+               footy_match[i, ]$player = 1
+               footy_match[i, ]$adjEventName = "keeper punt"
+               if (footy_match[i, ]$byUs == "true") {
+                 footy_match[i, ]$usPhase = "BP"
+                 footy_match[i, ]$oppositionPhase = "BPO"
+               } else {
+                 footy_match[i, ]$usPhase = "BPO"
+                 footy_match[i, ]$oppositionPhase = "BP"
+               }
+
+             }
          } else if (footy_match[i+1, ]$adjEventName == "keeper") {
            
            footy_match[i, ]$playNumber = prevPlayNumber 
@@ -108,7 +128,11 @@ for (j in 1:length(games)) {
            footy_match[i, ]$oppositionPhase = footy_match[i-1, ]$oppositionPhase
            
          } else if (footy_match[i-1, ]$adjEventName == "keeper" &
-                    footy_match[i, ]$adjEventName == "first touch") {
+                    !(footy_match[i, ]$adjEventName %in% c("change ends", "finish")) &
+                    !(footy_match[i, ]$lengthMetres > 16.5 |
+                      footy_match[i, ]$widthMetres > (75 - 17.34) |
+                      footy_match[i, ]$widthMetres < 17.34)) {
+          
            footy_match[i, ]$playNumber = prevPlayNumber + 1
            footy_match[i, ]$sequenceNumber = 1
            footy_match[i, ]$player = 1
@@ -236,6 +260,10 @@ for (j in 1:length(games)) {
    
 }
 
+write.csv(FootyGames, "FootyGames.csv", row.names = FALSE)
+FootyGames <- read.csv("FootyGames.csv", stringsAsFactors = FALSE)
+
+
 FootyGames %>% group_by(gameID, playNumber) %>%
   mutate(numSequences = n()) %>%
   filter(numSequences != sequenceNumber) %>%
@@ -270,8 +298,12 @@ footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
             playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
             totalPasses = sum(adjPass),
             playDuration = sum(duration),
+            firstDirection = first(direction),
+            firstLength = first(lengthMetres),
             goals = sum(ifelse(adjEventName == "goal", 1, 0)),
             shots = sum(ifelse(adjEventName == "shot", 1, 0)) )
+
+fm1 <- footy_match_play %>% 
 
 ggplot(footy_match_play %>% filter(#firstEvent == "throw in" &#playByUs == "true" & #theirName == "Lindfield A" &
                                   competition ==#%in% c("2019 World Cup 2019 Mens Open" ,
@@ -288,6 +320,90 @@ ggplot(footy_match_play %>% filter(#firstEvent == "throw in" &#playByUs == "true
        aes(x=totPass1, y= perc, fill=teamName) ) +
  geom_bar(stat = "identity", position = "dodge") #+
 # theme(legend.position="none")
+
+fmp1 <- footy_match_play %>% filter(totalPasses > 0) %>%
+  group_by(competition) %>%
+  mutate(sum_tp = n(),
+         totPass1 = ifelse(totalPasses < 7, totalPasses, 7)) %>%
+  group_by(competition, totPass1) %>%
+  summarise(stp = n(),
+            smp = max(sum_tp))
+fmp2 <- footy_match_play %>% filter(isAttackIncursion == 0 | goals > 0) %>%
+  group_by(competition) %>%
+  summarise(sum_tp = n(),
+         goals = sum(goals)) 
+
+fmp3 <- footy_match_play %>% filter(goals > 0) %>%
+  group_by(competition) %>%
+  mutate(totalGoals = sum(goals)) %>%
+  group_by(competition, totalPasses) %>%
+  summarise(sum_tp = n(),
+            goals = max(totalGoals)) 
+
+
+ggplot(fmp1 %>% filter(totPass1 <= 3) %>%
+         group_by(competition) %>%
+         summarise(stp = sum(stp),
+                   smp = max(smp)),
+       aes(x=competition, y= stp / smp) ) +
+  geom_bar(stat = "identity")  + 
+  geom_text(aes(label=scales::percent(stp / smp)), position = position_stack(vjust = .5))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# theme(legend.position="none")
+ggplot(fmp3 %>% filter(competitio) %>%
+         group_by(competition) %>%
+         summarise(stp = sum(stp),
+                   smp = max(smp)),
+       aes(x=competition, y= stp / smp) ) +
+  geom_bar(stat = "identity")  + 
+  geom_text(aes(label=scales::percent(stp / smp)), position = position_stack(vjust = .5))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# theme(legend.position="none")
+
+
+library(scales)
+ggplot(fmp2 ,
+         aes(x=competition, y= goals / sum_tp) ) +
+  geom_bar(stat = "identity")  + 
+  geom_text(aes(label=scales::percent(goals / sum_tp)), position = position_stack(vjust = .5))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+# theme(legend.position="none")
+
+table(ifelse(footy_match_play[footy_match_play$competition ==#%in% c("2019 World Cup 2019 Mens Open" ,
+                                #"2019 International Friendly Mens Open",
+                                #"2019 Icc Football Mens Open")# &
+                                "2019 NSFA 1 Boys Under 13" &
+                                footy_match_play$totalPasses > 0, ]$totalPasses < 7, footy_match_play[footy_match_play$competition ==#%in% c("2019 World Cup 2019 Mens Open" ,
+                                                                                                        #"2019 International Friendly Mens Open",
+                                                                                                        #"2019 Icc Football Mens Open")# &
+                                                                                                        "2019 NSFA 1 Boys Under 13" &
+                                                                                                        footy_match_play$totalPasses > 0, ]$totalPasses, 7),
+      footy_match_play[footy_match_play$competition ==#%in% c("2019 World Cup 2019 Mens Open" ,
+                         #"2019 International Friendly Mens Open",
+                         #"2019 Icc Football Mens Open")# &
+                         "2019 NSFA 1 Boys Under 13" &
+                         footy_match_play$totalPasses > 0, ]$totalPasses)
+sum(footy_match_play[footy_match_play$competition ==#%in% c("2019 World Cup 2019 Mens Open" ,
+    #"2019 International Friendly Mens Open",
+    #"2019 Icc Football Mens Open")# &
+    "2019 NSFA 1 Boys Under 13" &
+      footy_match_play$totalPasses > 0, ]$totalPasses)
+) )
+ggplot(footy_match_play %>% filter(#firstEvent == "throw in" &#playByUs == "true" & #theirName == "Lindfield A" &
+  competition ==#%in% c("2019 World Cup 2019 Mens Open" ,
+    #"2019 International Friendly Mens Open",
+    #"2019 Icc Football Mens Open")# &
+    "2019 NSFA 1 Boys Under 13" &
+    totalPasses > 0
+) %>% mutate(sum_tp = sum(totalPasses)) %>%
+   mutate(teamName = ifelse(playByUs == "true", ourName, theirName),
+         totPass1 = ifelse(totalPasses < 7, totalPasses, 7)) %>%
+  group_by(totPass1) %>%
+  summarise(perc = sum(totalPasses) / max(sum_tp) ),
+aes(x=totPass1, y= perc) ) +
+  geom_bar(stat = "identity", position = "dodge") #+
+# theme(legend.position="none")
+
 
 total_duration <- FootyGames %>% filter(pseudoEvent == FALSE) %>%
   group_by(gameID, byUs) %>% summarise(totalDuration = sum(ifelse(eventName == "keeper", 0, duration)))
