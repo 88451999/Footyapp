@@ -3,9 +3,10 @@ library(readr)
 library(dplyr)
 library(ggplot2)
 library(zoo)
+library(randomForest)
 
 setwd("/GitDev/Footyapp/data/") # use here function instead
-footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
+footy <- read.csv("fulldata.csv", sep = "|", stringsAsFactors = FALSE)
 
 #footy <- footy %>% filter(gameID == "-LklLiQLB8ze2uy6wHZr")
 #footy_match <- footy %>% filter(ourName == " Socceroos")
@@ -14,17 +15,25 @@ games = unique(footy$gameID)
 
 FootyGames <- data.frame()
 for (j in 1:length(games)) {
-  print(games[j])
+  print(paste(j, games[j]))
   footy_match <- footy %>% filter(gameID == games[j])
   
   kickoff = FALSE
   prevPlayNumber = 0
+  half = 1
+  footy_match$half = 0
   footy_match$attackIncursion = 0
   footy_match$adjEventName = ""
   footy_match$penaltyIncursion = 0
   footy_match$adjPass = 0
   footy_match$playNumber = 0
   footy_match$sequenceNumber = 0
+  footy_match$isBackPass = 0
+  footy_match$isFwdPass = 0
+  footy_match$isSidePass = 0
+  footy_match$isPass10m = 0
+  footy_match$isPass10_20m = 0
+  footy_match$isPass20m = 0
   footy_match$usPhase = ""
   footy_match$oppositionPhase = ""
   footy_match$pseudoEvent = FALSE
@@ -35,6 +44,7 @@ for (j in 1:length(games)) {
   footy_match$player = 0
   for (i in 1:nrow(footy_match)) {
   
+     footy_match[i, ]$half = half
      if (!kickoff) {
        if (footy_match[i, ]$adjEventName == "first touch" ) {
          footy_match[i, ]$adjEventName = "kick off"
@@ -55,6 +65,9 @@ for (j in 1:length(games)) {
      } else {
          if (footy_match[i, ]$adjEventName %in% c("change ends", "finish")) {
           print("change ends")
+           if (footy_match[i, ]$adjEventName == "change ends") {
+             half = half + 1
+           }
          } else if (footy_match[i-1, ]$adjEventName %in% c("sideline out", "sideline out defence") &
            footy_match[i, ]$adjEventName == "first touch") {       
            footy_match[i, ]$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
@@ -89,6 +102,19 @@ for (j in 1:length(games)) {
            footy_match[i, ]$sequenceNumber = 1
            footy_match[i, ]$player = 1
            footy_match[i, ]$adjEventName = "corner kick"
+           if (footy_match[i, ]$byUs == "true") {
+             footy_match[i, ]$usPhase = "BP"
+             footy_match[i, ]$oppositionPhase = "BPO"
+           } else {
+             footy_match[i, ]$usPhase = "BPO"
+             footy_match[i, ]$oppositionPhase = "BP"
+           } 
+         } else if (footy_match[i-1, ]$adjEventName == "penalty" &
+                    footy_match[i, ]$adjEventName == "first touch") {
+           footy_match[i, ]$playNumber = prevPlayNumber + 1
+           footy_match[i, ]$sequenceNumber = 1
+           footy_match[i, ]$player = 1
+           footy_match[i, ]$adjEventName = "penalty kick"
            if (footy_match[i, ]$byUs == "true") {
              footy_match[i, ]$usPhase = "BP"
              footy_match[i, ]$oppositionPhase = "BPO"
@@ -240,7 +266,7 @@ for (j in 1:length(games)) {
       if (footy_match[i, ]$byUs == footy_match[i+1, ]$byUs &
           footy_match[i, ]$adjEventName %in% c("throw in", "dribble", "kick off", "first touch", 
                                                "goal kick", "keeper punt", "corner kick",
-                                               "offside restart", "direct freekick", "indirect freekick") &
+                                               "offside restart", "direct restart", "indirect restart") &
           footy_match[i+1, ]$adjEventName %in% c("first touch")) {
         footy_match[i, ]$adjPass = 1
       }
@@ -260,8 +286,228 @@ for (j in 1:length(games)) {
    
 }
 
-write.csv(FootyGames, "FootyGames.csv", row.names = FALSE)
-FootyGames <- read.csv("FootyGames.csv", stringsAsFactors = FALSE)
+FootyGames$isBackPass <- ifelse(FootyGames$adjPass == 1 &
+                                  FootyGames$lengthChangeMetres < 0 &
+                                  (abs(FootyGames$direction) < 75 |  
+                                   abs(FootyGames$direction) > 105), 1, 0)
+FootyGames$isFwdPass <- ifelse(FootyGames$adjPass == 1 &
+                                  FootyGames$lengthChangeMetres > 0 &
+                                  (abs(FootyGames$direction) < 75 |  
+                                     abs(FootyGames$direction) > 105), 1, 0)
+FootyGames$isSidePass <- ifelse(FootyGames$adjPass == 1 &
+                                 (abs(FootyGames$direction) >= 75 &  
+                                    abs(FootyGames$direction) <= 105), 1, 0)
+FootyGames$isPass10m <- ifelse(FootyGames$isFwdPass == 1 &
+                                 FootyGames$distance <= 10, 1, 0)
+FootyGames$isPass10_20m <- ifelse(FootyGames$isFwdPass == 1 &
+                                 FootyGames$distance >10 &
+                                    FootyGames$distance <= 20, 1, 0)
+FootyGames$isPass20m <- ifelse(FootyGames$isFwdPass == 1 &
+                                 FootyGames$distance > 20, 1, 0)
+
+write.csv(FootyGames, "FootyGamesFull.csv", row.names = FALSE)
+FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
+unique(FootyGames$competition)
+
+team <- "NFC Red"
+FootyGames$kickoff_date = as.POSIXct(substr(FootyGames$time, 1, 19), format='%Y-%m-%d %H:%M:%S')
+footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
+  group_by(gameID, competition, ourName, theirName, playNumber) %>%
+  arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
+  summarise(gameDate = first(kickoff_date),
+            playByUs = first(byUs),
+            teamName = first(ifelse(playByUs == "true", ourName, theirName)),
+            usPhase = first(usPhase),
+            half = first(half),
+            oppositionPhase = first(oppositionPhase),
+            firstEvent = first(adjEventName),
+            lastEvent = last(adjEventName),
+            Area = first(case_when(lengthFraction <= 0.333333 ~ "Defence",
+                                   lengthFraction >= 0.666667 ~ "Attack",
+                                   TRUE ~ "Midfield") ),
+            firstEventArea = paste(firstEvent, "-", Area),
+            firstPenalyIncursion = first(penaltyIncursion),
+            numSequences = max(sequenceNumber),
+            numPlayers = max(player),
+            isAttackIncursion = max(attackIncursion),
+            isPenaltyIncursion = max(penaltyIncursion),
+            playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
+            totalPasses = sum(adjPass),
+            totalBackPasses = sum(isBackPass),
+            totalFwdPasses = sum(isFwdPass),
+            totalSidePasses = sum(isSidePass),
+            total10mPasses = sum(isPass10m),
+            total10_20mPasses = sum(isPass10_20m),
+            total20mPasses = sum(isPass20m),
+            possessionDuration = sum(ifelse(pseudoEvent == FALSE &
+                                              byUs == playByUs &
+                                              eventName != "keeper", duration, 0)),
+            AttackDuration = sum(ifelse(pseudoEvent == FALSE &
+                                              byUs == playByUs &
+                                              eventName != "keeper" &
+                                          Area == "Attack", duration, 0)),
+            MidfieldDuration = sum(ifelse(pseudoEvent == FALSE &
+                                          byUs == playByUs &
+                                          eventName != "keeper" &
+                                          Area == "Midfield", duration, 0)),
+            DefenceDuration = sum(ifelse(pseudoEvent == FALSE &
+                                          byUs == playByUs &
+                                          eventName != "keeper" &
+                                          Area == "Defence", duration, 0)),
+            AttackHalfDuration = sum(ifelse(pseudoEvent == FALSE &
+                                           byUs == playByUs &
+                                           eventName != "keeper" &
+                                           lengthMetres >= 55, duration, 0)),
+            DefenceHalfDuration = sum(ifelse(pseudoEvent == FALSE &
+                                               byUs == playByUs &
+                                               eventName != "keeper" &
+                                               lengthMetres < 55, duration, 0)),
+            playDuration = sum(duration),
+            crossfieldPlay = ifelse(max(widthMetres) - min(widthMetres) > 50, 1, 0),
+            goals = sum(ifelse(adjEventName == "goal", 1, 0)),
+            shots = sum(ifelse(adjEventName == "shot", 1, 0)) )
+footy_match_play$orderCol <- case_when(footy_match_play$teamName == team ~ 0,
+                                       footy_match_play$competition %in% c("2019 NSFA 1 Boys Under 13",
+                                                                           "2019 NSFA 1 Girls Under 16", "2019 Boys Under 14") ~ 1,
+                                       footy_match_play$competition=="2019 International Friendly Mens Open" ~ 2,
+                                       footy_match_play$competition=="2019 Icc Football Mens Open" ~ 3,
+                                       TRUE ~ 4)
+
+
+write.csv(footy_match_play, "fooy_match_play.csv", row.names = FALSE)
+
+sum(footy_match_play$crossfieldPlay, na.rm = TRUE)
+footy_match_game <- footy_match_play %>%
+  group_by(competition, gameID) %>%
+  mutate(gameDate= min(gameDate),
+         gameDuration = sum(possessionDuration),
+         gameAttackDuration = sum(AttackDuration),
+         gameMidfieldDuration = sum(MidfieldDuration),
+         gameDefenceDuration = sum(DefenceDuration),
+         goalsUs = sum(ifelse(playByUs == "true", goals, 0)),
+         goalsThem = sum(ifelse(playByUs == "false", goals, 0)),
+         ppmUs = sum(ifelse(playByUs == "true", totalPasses, 0))/
+                 sum(ifelse(playByUs == "true", possessionDuration/60, 0)),
+         ppmThem = sum(ifelse(playByUs == "false", totalPasses, 0))/
+           sum(ifelse(playByUs == "false", possessionDuration/60, 0)),
+         ppmUsAtt = sum(ifelse(playByUs == "true" & Area == "Attack", totalPasses, 0))/
+           sum(ifelse(playByUs == "true" & Area == "Attack", possessionDuration/60, 0)),
+         ppmThemAtt = sum(ifelse(playByUs == "false" & Area == "Attack", totalPasses, 0))/
+           sum(ifelse(playByUs == "false" & Area == "Attack", possessionDuration/60, 0)),
+         ppmUsMid = sum(ifelse(playByUs == "true" & Area == "Midfield", totalPasses, 0))/
+           sum(ifelse(playByUs == "true" & Area == "Midfield", possessionDuration/60, 0)),
+         ppmThemMid = sum(ifelse(playByUs == "false" & Area == "Midfield", totalPasses, 0))/
+           sum(ifelse(playByUs == "false" & Area == "Midfield", possessionDuration/60, 0)),
+         ppmUsDef = sum(ifelse(playByUs == "true" & Area == "Defence", totalPasses, 0))/
+           sum(ifelse(playByUs == "true" & Area == "Defence", possessionDuration/60, 0)),
+         ppmThemDef = sum(ifelse(playByUs == "false" & Area == "Defence", totalPasses, 0))/
+           sum(ifelse(playByUs == "false" & Area == "Defence", possessionDuration/60, 0)),
+         playsUs  = sum(ifelse(playByUs == "true", 1, 0)),
+         playsThem = sum(ifelse(playByUs == "false", 1, 0)),  
+         playsUsAtt = sum(ifelse(playByUs == "true" & Area != "Attack" &
+                                   isAttackIncursion == 1, 1, 0)),
+         playsThemAtt = sum(ifelse(playByUs == "false" & Area != "Attack" &
+                                   isAttackIncursion == 1, 1, 0)),
+         playsThemPen = sum(ifelse(playByUs == "false" & firstPenalyIncursion == 0 &
+                                     isPenaltyIncursion == 1, 1, 0)),  
+         playsUsPen = sum(ifelse(playByUs == "true" & firstPenalyIncursion == 0 &
+                                   isPenaltyIncursion == 1, 1, 0))) %>%
+  group_by(competition, gameID, gameDate, playByUs, teamName) %>%
+  summarise(passesPerMinute = max(ifelse(playByUs == "true", ppmUs, ppmThem)),
+            passesPerMinutePcnt = max(ifelse(playByUs == "true", ppmUs, ppmThem))/
+              max(ppmUs + ppmThem),
+            passesPerMinutePcntDiff = passesPerMinutePcnt - 0.5,
+            passesPerMinuteAtt = max(ifelse(playByUs == "true", ppmUsAtt, ppmThemAtt)),
+            passesPerMinuteAttPcnt = max(ifelse(playByUs == "true", ppmUsAtt, ppmThemAtt))/
+              max(ppmUsAtt + ppmThemAtt),
+            passesPerMinuteAttPcntDiff = passesPerMinuteAttPcnt - 0.5,
+            passesPerMinuteMid = max(ifelse(playByUs == "true", ppmUsMid, ppmThemMid)),
+            passesPerMinuteMidPcnt = max(ifelse(playByUs == "true", ppmUsMid, ppmThemMid))/
+              max(ppmUsMid + ppmThemMid),
+            passesPerMinuteMidPcntDiff = passesPerMinuteMidPcnt - 0.5,
+            passesPerMinuteDef = max(ifelse(playByUs == "true", ppmUsDef, ppmThemDef)),
+            passesPerMinuteDefPcnt = max(ifelse(playByUs == "true", ppmUsDef, ppmThemDef))/
+              max(ppmUsDef + ppmThemDef),
+            passesPerMinuteDefPcntDiff = passesPerMinuteDefPcnt - 0.5,
+            result = max(case_when((playByUs == "true" & goalsUs > goalsThem) |
+                                  (playByUs == "false" & goalsUs < goalsThem) ~ "Win",
+                                  goalsUs == goalsThem ~ "Draw",
+                                  TRUE ~ "Loss")),
+            possessionTime = sum(possessionDuration),
+            possessionPcnt = sum(possessionDuration)/ 
+                             max(gameDuration),
+            Passes = sum(totalPasses),
+            Plays = n(),
+            PlaysPassess = sum(ifelse(totalPasses > 0, 1, 0)),
+            Plays1_3Passes = sum(ifelse(totalPasses > 0 & totalPasses <= 3, 1, 0))/
+                             sum(ifelse(totalPasses > 0, 1, 0)),
+            Plays4_6Passes = sum(ifelse(totalPasses > 3 & totalPasses <= 6, 1, 0))/
+              sum(ifelse(totalPasses > 0, 1, 0)),
+            Plays7PlusPasses = sum(ifelse(totalPasses > 6, 1, 0))/
+              sum(ifelse(totalPasses > 0, 1, 0)),
+            PlaysNoPasses = sum(ifelse(totalPasses == 0, 1, 0))/
+              sum(totalPasses),
+            playsOpportunityPcnt = max(ifelse(playByUs == "true", playsUs, playsThem))/
+              max(playsUs + playsThem),
+            playsOpportunityPcntDiff = playsOpportunityPcnt - 0.5,
+            playIntoAttack = sum(ifelse(Area != "Attack" & isAttackIncursion == 1, 1, 0)),
+            playIntoPenalty = sum(ifelse(firstPenalyIncursion == 0 & isPenaltyIncursion == 1, 1, 0)),
+            playIntoAttackPcnt = playIntoAttack / PlaysPassess,
+            playIntoAttackDiff = max(ifelse(playByUs == "true", playsUsAtt, playsThemAtt))/
+              max(playsUsAtt + playsThemAtt),
+            playIntoPenaltyDiff = ifelse(max(playsUsPen + playsThemPen) == 0, 0, max(ifelse(playByUs == "true", playsUsPen, playsThemPen))/
+              max(playsUsPen + playsThemPen))
+            )
+
+footy_match_game <- footy_match_game[!footy_match_game$competition == "2017 Mens Open", ]
+
+# Run RandomForest and remove ID field as this is NOT a predictor
+footy_match_game$result <- as.factor(footy_match_game$result)
+footy_match_game$default = as.factor(ifelse(footy_match_game$result == "Loss", 0, ifelse(footy_match_game$result == "Win", 2, 1)))
+
+trainset = footy_match_game[!footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", "2019 NSFA 1 Boys Under 13", "2019 World Cup 2019 Mens Open",             
+                                                                "2019 International Friendly Mens Open"   ,  
+                                                                "2019 Boys Under 14"                ,        
+                                                                "2019 Icc Football Mens Open"), ]
+testset = footy_match_game[footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", "2019 NSFA 1 Boys Under 13", "2019 World Cup 2019 Mens Open",             
+                                                               "2019 International Friendly Mens Open"   ,  
+                                                               "2019 Boys Under 14"                ,        
+                                                               "2019 Icc Football Mens Open"), ]
+tx.rf <- randomForest(default ~ playIntoAttackDiff + passesPerMinutePcntDiff +
+                        playIntoPenaltyDiff +
+                        passesPerMinuteMidPcntDiff +
+                        passesPerMinuteAttPcntDiff + 
+                        passesPerMinuteDefPcntDiff + 
+                        possessionPcnt  + 
+                        Plays1_3Passes +
+                        Plays4_6Passes +
+                        Plays7PlusPasses +
+                        playsOpportunityPcnt ,
+                      data = trainset, 
+                      importance=TRUE, ntree=1000, #xtest=testset[, !(colnames(testset) %in% c("ID", 'default'))],
+                      keep.forest = T)
+footy_match_game$probability = predict(tx.rf, newdata = footy_match_game, type = "response")
+footy_match_game$prob  = predict(tx.rf, newdata = footy_match_game, type = "prob")
+footy_match_game$predicted = ifelse(footy_match_game$probability < 0.5, 0, 1)
+
+testset$probability = predict(tx.rf, newdata = testset, type = "response")
+testset$prob  = predict(tx.rf, newdata = testset, type = "prob")
+
+table(testset$default, testset$probability)
+
+summary(tx.rf)
+varImpPlot(tx.rf)
+names(tx.rf)
+comp <- "2019 NSFA 1 Boys Under 13"
+team <- "NFC Red"
+
+footy_match_play <- footy_match_play %>%
+  filter(!competition %in%
+           c("2019 NSFA 1 Girls Under 16", "2019 Boys Under 14") )
+
+footy_match_play$teamName = ifelse(footy_match_play$playByUs == "true", footy_match_play$ourName, footy_match_play$theirName)
+
+
 
 
 FootyGames %>% group_by(gameID, playNumber) %>%
@@ -298,6 +544,9 @@ footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
             playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
             totalPasses = sum(adjPass),
             playDuration = sum(duration),
+            possessionDuration = sum(ifelse(pseudoEvent == FALSE &
+                                              byUs == playByUs &
+                                              eventName != "keeper", duration, 0)),
             firstDirection = first(direction),
             firstLength = first(lengthMetres),
             goals = sum(ifelse(adjEventName == "goal", 1, 0)),
@@ -404,8 +653,9 @@ aes(x=totPass1, y= perc) ) +
   geom_bar(stat = "identity", position = "dodge") #+
 # theme(legend.position="none")
 
-
-total_duration <- FootyGames %>% filter(pseudoEvent == FALSE) %>%
+sum(total_duration$totalDuration)
+sum(footy_match_play$possessionDuration)
+total_duration <- FootyGames %>% filter(pseudoEvent == FALSE & playNumber > 0) %>%
   group_by(gameID, byUs) %>% summarise(totalDuration = sum(ifelse(eventName == "keeper", 0, duration)))
 
 footySum <- footy_match_play %>% filter(playNumber > 0) %>% 
@@ -422,6 +672,61 @@ footySum <- footy_match_play %>% filter(playNumber > 0) %>%
             shots = sum(shots)) %>% 
   left_join(total_duration, by=c("playByUs" =  "byUs", "gameID" = "gameID")) %>%
   mutate(playPerMin = sumPasses/(totalDuration/60))
+
+footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
+  group_by(gameID, competition, ourName, theirName, playNumber) %>%
+  arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
+  summarise(playByUs = first(byUs),
+            usPhase = first(usPhase),
+            oppositionPhase = first(oppositionPhase),
+            firstEvent = first(adjEventName),
+            lastEvent = last(adjEventName),
+            Area = first(case_when(lengthFraction <= 0.333333 ~ "Defence",
+                                   lengthFraction >= 0.666667 ~ "Attack",
+                                   TRUE ~ "Midfield") ),
+            firstEventArea = paste(firstEvent, "-", Area),
+            firstPenalyIncursion = first(penaltyIncursion),
+            numSequences = max(sequenceNumber),
+            numPlayers = max(player),
+            isAttackIncursion = max(attackIncursion),
+            isPenaltyIncursion = max(penaltyIncursion),
+            playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
+            totalPasses = sum(adjPass),
+            possessionDuration = sum(ifelse(pseudoEvent == FALSE &
+                                              byUs == playByUs &
+                                              eventName != "keeper", duration, 0)),
+            playDuration = sum(ifelse(pseudoEvent == FALSE, duration, 0)),
+            goals = sum(ifelse(adjEventName == "goal", 1, 0)),
+            shots = sum(ifelse(adjEventName == "shot", 1, 0)) )
+
+sum(footy_match_play$possessionDuration)
+table(total_duration$gameID, total_duration$totalDuration)
+footySum %>% group_by(competition, teamName) %>%
+  summarise(sum(sumPasses), sum(totalDuration))
+
+comp <- "2019 NSFA 1 Boys Under 13"
+team <- "NFC Red"
+footy_match_play$teamName = ifelse(footy_match_play$playByUs == "true", footy_match_play$ourName, footy_match_play$theirName)
+footy_match_play$orderCol <- case_when(footy_match_play$competition == comp & footy_match_play$teamName == team ~ 0,
+                                       footy_match_play$competition %in% c("2019 NSFA 1 Boys Under 13",
+                                                                           "2019 NSFA 1 Girls Under 16", "2019 Boys Under 14") ~ 1,
+                                       footy_match_play$competition=="2019 International Friendly Mens Open" ~ 2,
+                                       footy_match_play$competition=="2019 Icc Football Mens Open" ~ 3,
+                                       TRUE ~ 4)
+
+ # All teams 3 passes or less percentage
+ggplot(footy_match_play %>% 
+         ungroup %>% group_by(teamName, orderCol) %>%
+         summarise(sum(totalPasses)/ sum(possessionDuration/60)) ,
+       aes(x=reorder(teamName, orderCol, FUN=max), y= ppm, fill=teamName) ) +
+  geom_bar( stat = "identity", position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none",
+        plot.title = element_text(hjust=0.5)) + 
+  labs(x = "Team", y = "Passes", 
+       title = "Passes Per Minute") 
+```
+
 
 footy_match %>% filter(adjPass == 1 & lengthChangeMetres < -8) %>%
        group_by(byUs) %>% summarise(n())
