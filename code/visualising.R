@@ -3,6 +3,15 @@ install.packages("rgdal")
 install.packages("tmap")
 install.packages("ggsoccer")
 install.packages("adehabitatHR")
+install.packages("bookdown")
+
+install.packages('rsconnect')
+rsconnect::setAccountInfo(name='petermcnamara',
+                          token='CAA362C7B4E0CF0A4A6C22539CDFA46C',
+                          secret='q8YXGNWRt5zfghAA6pFhOebW3/9G/1NYhHOzvyp9')
+
+library(rsconnect)
+rsconnect::deployApp('path/to/your/app')
 
 library(sp)
 library(rgdal)
@@ -15,10 +24,10 @@ library(raster)
 FootyGames <- FootyGames %>% group_by(gameID, byUs, playNumber) %>%
   mutate(maxSeq = max(sequenceNumber), 
          playByUs = first(byUs))
-footy_pass <- FootyGames %>% filter(gameID == "-LlKBtky-O-yxKntBlx9" &
-  #competition == "2019 Icc Football Mens Open" & 
+footy_pass <- FootyGames %>% filter(#gameID == "-LlKBtky-O-yxKntBlx9" &
+  competition ==  "2019 NSFA 1 Girls Under 16" & 
                                  #   theirName == "Hornsby Heights" & 
-                                      playByUs == "false" & #sequenceNumber == 1 &
+                                      playByUs == "true" & #sequenceNumber == 1 &
                    adjEventName %in% c("first touch", "kickoff",
                                        "throw in", "goal kick", "keeper punt", 
                                        "offside restart"))

@@ -7,11 +7,11 @@ library(randomForest)
 
 setwd("/GitDev/Footyapp/data/") # use here function instead
 footy <- read.csv("fulldata.csv", sep = "|", stringsAsFactors = FALSE)
-
-#footy <- footy %>% filter(gameID == "-LklLiQLB8ze2uy6wHZr")
+unique(footy$competition)
 #footy_match <- footy %>% filter(ourName == " Socceroos")
 #footy_match <- footy
 games = unique(footy$gameID)
+print(paste("Number of games -", length(games)))
 
 FootyGames <- data.frame()
 for (j in 1:length(games)) {
@@ -234,7 +234,9 @@ for (j in 1:length(games)) {
            footy_extra = footy_match[i, ]
            footy_extra$pseudoEvent = TRUE
            footy_extra$lengthFraction = 1 - footy_extra$lengthFraction
-           footy_extra$lengthMetres = 110 - footy_extra$lengthMetres         
+           footy_extra$lengthMetres = 110 - footy_extra$lengthMetres 
+           footy_extra$widthFraction = 1 - footy_extra$widthFraction
+           footy_extra$widthMetres = 75 - footy_extra$widthMetres         
            footy_extra$playNumber = prevPlayNumber
            footy_extra$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
            footy_extra$player = footy_match[i-1, ]$player + 1
@@ -263,21 +265,22 @@ for (j in 1:length(games)) {
     # sort out was it an attacking incursion, penalty area incursion
     # and track previous play number
     if (footy_match[i, ]$playNumber > 0) {
-      if (footy_match[i, ]$byUs == footy_match[i+1, ]$byUs &
-          footy_match[i, ]$adjEventName %in% c("throw in", "dribble", "kick off", "first touch", 
+      prevPlayNumber = footy_match[i, ]$playNumber
+      if (footy_match[i, ]$byUs == footy_match[i+1, ]$byUs) {
+          if (footy_match[i, ]$adjEventName %in% c("throw in", "dribble", "kick off", "first touch", 
                                                "goal kick", "keeper punt", "corner kick",
                                                "offside restart", "direct restart", "indirect restart") &
-          footy_match[i+1, ]$adjEventName %in% c("first touch")) {
-        footy_match[i, ]$adjPass = 1
-      }
-      prevPlayNumber = footy_match[i, ]$playNumber
-      if (footy_match[i, ]$lengthFraction >= 0.66666667) {
-        footy_match[i, ]$attackIncursion = 1
-      }
-      if (footy_match[i, ]$lengthMetres >= (110 - 16.5) &
-          footy_match[i, ]$widthMetres <= (75 - 17.34) &
-          footy_match[i, ]$widthMetres >= 17.34) {
-        footy_match[i, ]$penaltyIncursion = 1
+              footy_match[i+1, ]$adjEventName %in% c("first touch")) {
+           footy_match[i, ]$adjPass = 1
+          }
+          if (footy_match[i, ]$lengthFraction >= 0.66666667) {
+            footy_match[i, ]$attackIncursion = 1
+          }
+          if (footy_match[i, ]$lengthMetres >= (110 - 16.5) &
+              footy_match[i, ]$widthMetres <= (75 - 17.34) &
+              footy_match[i, ]$widthMetres >= 17.34) {
+            footy_match[i, ]$penaltyIncursion = 1
+          }
       }
     }
     
@@ -304,11 +307,18 @@ FootyGames$isPass10_20m <- ifelse(FootyGames$isFwdPass == 1 &
                                     FootyGames$distance <= 20, 1, 0)
 FootyGames$isPass20m <- ifelse(FootyGames$isFwdPass == 1 &
                                  FootyGames$distance > 20, 1, 0)
-
+FootyGames$zone <- (floor(ifelse(FootyGames$widthFraction== 1, 2, 
+                                 FootyGames$widthFraction*3))+1)+(3*floor(ifelse(FootyGames$lengthFraction== 1, 6, 
+          
+                                                                                                                                                FootyGames$lengthFraction*6)))
 write.csv(FootyGames, "FootyGamesFull.csv", row.names = FALSE)
 FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
-unique(FootyGames$competition)
 
+FootyGamesUs <- FootyGames %>% filter(competition == "2019 NSFA 1 Boys Under 13")
+write.csv(FootyGamesUs, "FootyGamesUs.csv", row.names = FALSE)
+
+unique(FootyGames$competition)
+sum(footy_match_play$isZone17Incursion, na.rm = TRUE)
 team <- "NFC Red"
 FootyGames$kickoff_date = as.POSIXct(substr(FootyGames$time, 1, 19), format='%Y-%m-%d %H:%M:%S')
 footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
@@ -325,12 +335,19 @@ footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
             Area = first(case_when(lengthFraction <= 0.333333 ~ "Defence",
                                    lengthFraction >= 0.666667 ~ "Attack",
                                    TRUE ~ "Midfield") ),
+            lastArea = last(case_when(lengthFraction <= 0.333333 ~ "Defence",
+                                   lengthFraction >= 0.666667 ~ "Attack",
+                                   TRUE ~ "Midfield") ),
             firstEventArea = paste(firstEvent, "-", Area),
             firstPenalyIncursion = first(penaltyIncursion),
+            firstZone = first(zone),
+            lastZone = last(zone),
             numSequences = max(sequenceNumber),
             numPlayers = max(player),
             isAttackIncursion = max(attackIncursion),
             isPenaltyIncursion = max(penaltyIncursion),
+            isZone14Incursion = max(ifelse(zone==14 & byUs == playByUs, 1, 0), na.rm=TRUE),
+            isZone17Incursion = max(ifelse(zone==17 & byUs == playByUs, 1, 0), na.rm=TRUE),
             playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
             totalPasses = sum(adjPass),
             totalBackPasses = sum(isBackPass),
@@ -375,8 +392,16 @@ footy_match_play$orderCol <- case_when(footy_match_play$teamName == team ~ 0,
 
 
 write.csv(footy_match_play, "fooy_match_play.csv", row.names = FALSE)
+footy_match_play <- read.csv("fooy_match_play.csv", stringsAsFactors = FALSE)
+footy_match_play$joinColumn <- 1
 
-sum(footy_match_play$crossfieldPlay, na.rm = TRUE)
+joinColumn <- c(1, 1)
+UsTeam <- c("true", "false")
+duplicate <- data.frame(joinColumn, UsTeam)
+fmp <- footy_match_play %>%
+  full_join(duplicate, c("joinColumn" = "joinColumn"))
+
+
 footy_match_game <- footy_match_play %>%
   group_by(competition, gameID) %>%
   mutate(gameDate= min(gameDate),
@@ -411,7 +436,19 @@ footy_match_game <- footy_match_play %>%
          playsThemPen = sum(ifelse(playByUs == "false" & firstPenalyIncursion == 0 &
                                      isPenaltyIncursion == 1, 1, 0)),  
          playsUsPen = sum(ifelse(playByUs == "true" & firstPenalyIncursion == 0 &
-                                   isPenaltyIncursion == 1, 1, 0))) %>%
+                                   isPenaltyIncursion == 1, 1, 0)),
+         playsThem17 = sum(ifelse(playByUs == "false" & firstZone != 17 &
+                              isZone17Incursion == 1, 1, 0)),  
+         playsUs17 = sum(ifelse(playByUs == "true" & firstZone != 17 &
+                                    isZone17Incursion == 1, 1, 0)),
+         playsThem14 = sum(ifelse(playByUs == "false" & firstZone != 14 &
+                                    isZone14Incursion == 1, 1, 0)),  
+         playsUs14 = sum(ifelse(playByUs == "true" & firstZone != 14 &
+                                  isZone14Incursion == 1, 1, 0)),
+         playsUsAttTurn = sum(ifelse(playByUs == "true" & usPhase == "BPO > BP" &
+                                    Area == "Attack" & firstEvent == "first touch", 1, 0)),
+         playsThemAttTurn = sum(ifelse(playByUs == "false" & usPhase == "BPO > BP" &
+                                       Area == "Attack" & firstEvent == "first touch", 1, 0))) %>%
   group_by(competition, gameID, gameDate, playByUs, teamName) %>%
   summarise(passesPerMinute = max(ifelse(playByUs == "true", ppmUs, ppmThem)),
             passesPerMinutePcnt = max(ifelse(playByUs == "true", ppmUs, ppmThem))/
@@ -456,7 +493,15 @@ footy_match_game <- footy_match_play %>%
             playIntoAttackDiff = max(ifelse(playByUs == "true", playsUsAtt, playsThemAtt))/
               max(playsUsAtt + playsThemAtt),
             playIntoPenaltyDiff = ifelse(max(playsUsPen + playsThemPen) == 0, 0, max(ifelse(playByUs == "true", playsUsPen, playsThemPen))/
-              max(playsUsPen + playsThemPen))
+              max(playsUsPen + playsThemPen)),
+         #   playsUs17 = max(playsThem14),
+          #  playsThem17 = max(playsThem17),
+            playInto17Diff = ifelse(max(playsUs17 + playsThem17) == 0, 0, max(ifelse(playByUs == "true", playsUs17, playsThem17))/
+                                           max(playsUs17 + playsThem17)),
+            playInto14Diff = ifelse(max(playsUs14 + playsThem14) == 0, 0, max(ifelse(playByUs == "true", playsUs14, playsThem14))/
+                                           max(playsUs14 + playsThem14)),
+            playAttTurnDiff = ifelse(max(playsUsAttTurn + playsThemAttTurn) == 0, 0, max(ifelse(playByUs == "true", playsUsAttTurn, playsThemAttTurn))/
+                                         max(playsUsAttTurn + playsThemAttTurn))
             )
 
 footy_match_game <- footy_match_game[!footy_match_game$competition == "2017 Mens Open", ]
@@ -464,17 +509,24 @@ footy_match_game <- footy_match_game[!footy_match_game$competition == "2017 Mens
 # Run RandomForest and remove ID field as this is NOT a predictor
 footy_match_game$result <- as.factor(footy_match_game$result)
 footy_match_game$default = as.factor(ifelse(footy_match_game$result == "Loss", 0, ifelse(footy_match_game$result == "Win", 2, 1)))
-
-trainset = footy_match_game[!footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", "2019 NSFA 1 Boys Under 13", "2019 World Cup 2019 Mens Open",             
+unique(footy_match_game$competition)
+trainset = footy_match_game[!footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", 
+                                                                 "2019 NSFA 1 Boys Under 13", 
+                                                                 "2019 World Cup 2019 Mens Open",             
                                                                 "2019 International Friendly Mens Open"   ,  
                                                                 "2019 Boys Under 14"                ,        
-                                                                "2019 Icc Football Mens Open"), ]
+                                                                "2019 Icc Football Mens Open"
+                                                                ), ]
 testset = footy_match_game[footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", "2019 NSFA 1 Boys Under 13", "2019 World Cup 2019 Mens Open",             
                                                                "2019 International Friendly Mens Open"   ,  
                                                                "2019 Boys Under 14"                ,        
-                                                               "2019 Icc Football Mens Open"), ]
-tx.rf <- randomForest(default ~ playIntoAttackDiff + passesPerMinutePcntDiff +
-                        playIntoPenaltyDiff +
+                                                               "2019 Icc Football Mens Open"
+                                                            ), ]
+tx.rf <- randomForest(default ~ playInto17Diff + playInto14Diff +
+                        playAttTurnDiff +
+                        playIntoAttackDiff + 
+                        passesPerMinutePcntDiff +
+                    #    playIntoPenaltyDiff +
                         passesPerMinuteMidPcntDiff +
                         passesPerMinuteAttPcntDiff + 
                         passesPerMinuteDefPcntDiff + 
@@ -484,7 +536,7 @@ tx.rf <- randomForest(default ~ playIntoAttackDiff + passesPerMinutePcntDiff +
                         Plays7PlusPasses +
                         playsOpportunityPcnt ,
                       data = trainset, 
-                      importance=TRUE, ntree=1000, #xtest=testset[, !(colnames(testset) %in% c("ID", 'default'))],
+                      importance=TRUE, ntree=2000, #xtest=testset[, !(colnames(testset) %in% c("ID", 'default'))],
                       keep.forest = T)
 footy_match_game$probability = predict(tx.rf, newdata = footy_match_game, type = "response")
 footy_match_game$prob  = predict(tx.rf, newdata = footy_match_game, type = "prob")
