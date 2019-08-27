@@ -3,17 +3,23 @@ library(readr)
 library(dplyr)
 library(ggplot2)
 library(zoo)
+library(lubridate)
 library(randomForest)
 
 setwd("/GitDev/Footyapp/data/") # use here function instead
-footy <- read.csv("fulldata.csv", sep = "|", stringsAsFactors = FALSE)
-unique(footy$competition)
+FootyGames <- data.frame()
+if(file.exists("FootyGamesFull.csv")){
+  FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
+}
+
+footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
+#footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
+games <- unique(footy[! footy$gameID %in% FootyGames$gameID, ]$gameID)
+
 #footy_match <- footy %>% filter(ourName == " Socceroos")
 #footy_match <- footy
-games = unique(footy$gameID)
 print(paste("Number of games -", length(games)))
 
-FootyGames <- data.frame()
 for (j in 1:length(games)) {
   print(paste(j, games[j]))
   footy_match <- footy %>% filter(gameID == games[j])
@@ -42,6 +48,15 @@ for (j in 1:length(games)) {
                                        footy_match$distanceToNextEventMetres > 15 ~ "first touch",
                                        TRUE ~ footy_match$eventName)
   footy_match$player = 0
+  footy_match$zone = ""
+  footy_match$maxSeq = 0
+  footy_match$isAttackIncursion = 0
+  footy_match$isGoal = 0
+  footy_match$totPass = 0
+  footy_match$firstEvent = ""
+  footy_match$playByUs = ""
+  footy_match$matchName = ""
+
   for (i in 1:nrow(footy_match)) {
   
      footy_match[i, ]$half = half
@@ -289,6 +304,8 @@ for (j in 1:length(games)) {
    
 }
 
+FootyGames[is.na(FootyGames$direction), ]$direction <- 0
+
 FootyGames$isBackPass <- ifelse(FootyGames$adjPass == 1 &
                                   FootyGames$lengthChangeMetres < 0 &
                                   (abs(FootyGames$direction) < 75 |  
@@ -308,16 +325,65 @@ FootyGames$isPass10_20m <- ifelse(FootyGames$isFwdPass == 1 &
 FootyGames$isPass20m <- ifelse(FootyGames$isFwdPass == 1 &
                                  FootyGames$distance > 20, 1, 0)
 FootyGames$zone <- (floor(ifelse(FootyGames$widthFraction== 1, 2, 
-                                 FootyGames$widthFraction*3))+1)+(3*floor(ifelse(FootyGames$lengthFraction== 1, 6, 
-          
-                                                                                                                                                FootyGames$lengthFraction*6)))
+                                 FootyGames$widthFraction*3))+1)+(3*floor(ifelse(FootyGames$lengthFraction>= 1, 5, 
+                      FootyGames$lengthFraction*6)))
+FootyGames %>% filter(zone > 18) %>% select(adjEventName,
+                                            widthFraction, lengthFraction, zone)
+FootyGames <- FootyGames %>% group_by(gameID, byUs, playNumber) %>%
+  mutate(maxSeq = max(sequenceNumber), 
+         isAttackIncursion = max(attackIncursion),
+         isGoal = ifelse(last(adjEventName == "goal"), 1, 0),
+         totPass = sum(adjPass),
+         firstEvent = first(adjEventName),
+         playByUs = first(byUs),
+         matchName = paste(format(ymd(substr(time, 1, 10)), "%d/%m/%y"), "-", theirName) )
+
+
 write.csv(FootyGames, "FootyGamesFull.csv", row.names = FALSE)
+FgUs <- FootyGames %>% filter(competition == "2019 NSFA 1 Boys Under 13")
+write.csv(FgUs, "FootyGamesUs.csv", row.names = FALSE)
+FgUs <- FootyGames %>% filter(competition == "2019 NSFA 1 Girls Under 16")
+write.csv(FgUs, "FootyGames16.csv", row.names = FALSE)
+
+
+footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
+  group_by(gameID, competition, ourName, theirName, playNumber) %>%
+  arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
+  summarise(playByUs = first(byUs),
+            matchName = first(matchName),
+            gameDate = first(ymd(substr(time, 1, 10))),
+            usPhase = first(usPhase),
+            oppositionPhase = first(oppositionPhase),
+            firstEvent = first(adjEventName),
+            lastEvent = last(adjEventName),
+            Area = first(case_when(lengthFraction <= 0.333333 ~ "Defence",
+                                   lengthFraction >= 0.666667 ~ "Attack",
+                                   TRUE ~ "Midfield") ),
+            firstEventArea = paste(firstEvent, "-", Area),
+            firstPenalyIncursion = first(penaltyIncursion),
+            numSequences = max(sequenceNumber),
+            numPlayers = max(player),
+            isAttackIncursion = max(attackIncursion),
+            isPenaltyIncursion = max(penaltyIncursion),
+            playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
+            totalPasses = sum(adjPass),
+            possessionDuration = sum(ifelse(pseudoEvent == FALSE &
+                                              byUs == playByUs &
+                                              eventName != "keeper", duration, 0)),
+            playDuration = sum(duration),
+            goals = sum(ifelse(adjEventName == "goal", 1, 0)),
+            shots = sum(ifelse(adjEventName == "shot", 1, 0)) )
+fmp_Us <- footy_match_play %>% filter(competition == "2019 NSFA 1 Boys Under 13")
+write.csv(fmp_Us, "FootyMatchPlayUs.csv", row.names = FALSE)
+fmp_Us <- footy_match_play %>% filter(competition == "2019 NSFA 1 Girls Under 16")
+write.csv(fmp_Us, "FootyMatchPlay16.csv", row.names = FALSE)
+
+
+
+
+
 FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
 
-FootyGamesUs <- FootyGames %>% filter(competition == "2019 NSFA 1 Boys Under 13")
-write.csv(FootyGamesUs, "FootyGamesUs.csv", row.names = FALSE)
-
-unique(FootyGames$competition)
 sum(footy_match_play$isZone17Incursion, na.rm = TRUE)
 team <- "NFC Red"
 FootyGames$kickoff_date = as.POSIXct(substr(FootyGames$time, 1, 19), format='%Y-%m-%d %H:%M:%S')
@@ -344,6 +410,9 @@ footy_match_play <- FootyGames %>% #filter(playNumber == 1) %>%
             lastZone = last(zone),
             numSequences = max(sequenceNumber),
             numPlayers = max(player),
+            distance = sum(ifelse(lead(byUs) == byUs &
+                                    lead(adjEventName) %in% c("first touch", "dribble", "shot", "goal"), 
+                                  distanceToNextEventMetres, 0)),
             isAttackIncursion = max(attackIncursion),
             isPenaltyIncursion = max(penaltyIncursion),
             isZone14Incursion = max(ifelse(zone==14 & byUs == playByUs, 1, 0), na.rm=TRUE),
@@ -396,12 +465,138 @@ footy_match_play <- read.csv("fooy_match_play.csv", stringsAsFactors = FALSE)
 footy_match_play$joinColumn <- 1
 
 joinColumn <- c(1, 1)
-UsTeam <- c("true", "false")
+UsTeam <- c(1, 2)
 duplicate <- data.frame(joinColumn, UsTeam)
 fmp <- footy_match_play %>%
   full_join(duplicate, c("joinColumn" = "joinColumn"))
 
+footy_match_game1 <- footy_match_play %>%
+  group_by(competition, gameID, teamName, playByUs, joinColumn) %>%
+  summarise(gameDate= min(gameDate),
+         gameDuration = sum(possessionDuration),
+         gameAttackDuration = sum(AttackDuration),
+         gameMidfieldDuration = sum(MidfieldDuration),
+         gameDefenceDuration = sum(DefenceDuration),
+         gameDistance = sum(distance),
+         goals = sum(goals),
+         shots = sum(shots),
+         ppm = sum(totalPasses)/sum(possessionDuration/60),
+         attackPlay = sum(ifelse(lastArea == "Attack", 1, 0)),
+         midfieldPlay = sum(ifelse(lastArea == "Midfield", 1, 0)),
+         defencePlay = sum(ifelse(lastArea == "Defence", 1, 0)),
+         penaltyPlay = sum(ifelse(isPenaltyIncursion == 1, 1, 0)),
+         zone14Play = sum(ifelse(isZone14Incursion == 1, 1, 0)),
+         zone17Play = sum(ifelse(isZone17Incursion == 1, 1, 0)),
+         backPass = sum(totalBackPasses),
+         sidePass = sum(totalSidePasses),
+         fwdPass = sum(totalFwdPasses),
+         backPlay = sum(ifelse(totalBackPasses > 0, 1, 0)),
+         sidePlay = sum(ifelse(totalSidePasses > 0, 1, 0)),
+         fwdPlay = sum(ifelse(totalFwdPasses > 0, 1, 0)),
+         noPassPlay = sum(ifelse(totalPasses == 0, 1, 0)),
+         passPlay = sum(ifelse(totalPasses > 1, 1, 0)),
+         plays = n(),
+         Plays1_3Passes = sum(ifelse(totalPasses > 0 & totalPasses <= 3, 1, 0)),
+         Plays4_6Passes = sum(ifelse(totalPasses > 3 & totalPasses <= 6, 1, 0)),
+         Plays7PlusPasses = sum(ifelse(totalPasses > 6, 1, 0)),
+         playsAttTurn = sum(ifelse(Area == "Attack" & firstEvent == "first touch", 1, 0))
+         ) %>%
+         left_join(duplicate, c("joinColumn" = "joinColumn")) %>%
+  ungroup () %>%
+         group_by(competition, gameID, UsTeam) %>%
+         mutate(gameAttackDurationPcnt = gameAttackDuration / sum(gameAttackDuration),
+                gameMidfieldDurationPcnt = gameMidfieldDuration / sum(gameMidfieldDuration),
+                gameDefenceDurationPcnt = gameDefenceDuration / sum(gameDefenceDuration),
+                ppmPcnt = ppm / sum(ppm),
+                result = case_when(sum(goals) == 0 ~ "Draw",
+                                   goals/sum(goals) == 0.5 ~ "Draw",
+                                   goals/sum(goals) < 0.5 ~ "Loss", 
+                                   TRUE ~ "Win"),
+                default = ifelse(result == "Draw", 1,
+                                ifelse(result == "Loss", 0, 2)),
+                zone14PlayPcnt = zone14Play / sum(zone14Play),
+                zone17PlayPcnt = zone17Play / sum(zone17Play),
+                attackPlayPcnt = attackPlay / sum(attackPlay),
+                backPlayPcnt = backPlay / sum(backPlay),
+                sidePlayPcnt = sidePlay / sum(sidePlay),
+                fwdPlayPcnt = fwdPlay / sum(fwdPlay),
+                backPassPcnt = backPass / sum(backPass),
+                sidePassPcnt = sidePass / sum(sidePass),
+                fwdPassPcnt = fwdPass / sum(fwdPass),
+                noPassPlayPcnt = noPassPlay / sum(noPassPlay),
+                passPlayPcnt = passPlay / sum(passPlay),
+                playsPcnt = plays / sum(plays),
+                Plays1_3PassesPcnt = Plays1_3Passes / sum(Plays1_3Passes),
+                Plays4_6PassesPcnt = ifelse(sum(Plays4_6Passes) == 0, 0, Plays4_6Passes / sum(Plays4_6Passes)),
+                Plays7PlusPassesPcnt = ifelse(sum(Plays7PlusPasses) == 0, 0, Plays7PlusPasses / sum(Plays7PlusPasses)),
+                playsAttTurnPcnt = playsAttTurn / sum(playsAttTurn),
+                shotPcnt = shots / sum(shots),
+                distPcnt = gameDistance / sum(gameDistance)) %>%
+             filter(UsTeam == 1)
+footy_match_game1 <- footy_match_game1[!footy_match_game1$competition == "2017 Mens Open", ]
 
+# Run RandomForest and remove ID field as this is NOT a predictor
+footy_match_game1$result <- as.factor(footy_match_game1$result)
+footy_match_game1$default = as.factor(footy_match_game1$default)
+trainset = footy_match_game1[!footy_match_game1$competition %in% c("2019 NSFA 1 Girls Under 16", 
+                                                                           "2019 NSFA 1 Boys Under 13", 
+                                                                           "2019 World Cup 2019 Mens Open",             
+                                                                           "2019 International Friendly Mens Open"   ,  
+                                                                           "2019 Boys Under 14"                ,        
+                                                                           "2019 Icc Football Mens Open"
+), ]
+
+library(DMwR)
+library(caret)
+# Since positive Target is small, use SMOTE to rebalance the class in Training Set
+trainset$competition <- as.factor(trainset$competition)
+trainset$gameID <- as.factor(trainset$gameID)
+trainset$gameDate <- as.factor(trainset$gameDate)
+trainset$playByUs <- as.factor(trainset$playByUs)
+trainset$teamName <- as.factor(trainset$teamName)
+trainset$prob <- NULL
+
+testset = footy_match_game1[footy_match_game1$competition %in% c("2019 NSFA 1 Girls Under 16", "2019 NSFA 1 Boys Under 13", "2019 World Cup 2019 Mens Open",             
+                                                                         "2019 International Friendly Mens Open"   ,  
+                                                                         "2019 Boys Under 14"                ,        
+                                                                         "2019 Icc Football Mens Open"
+), ]
+tx.rf <- randomForest(default ~ shotPcnt + zone14PlayPcnt + 
+                        zone17PlayPcnt +
+                        gameAttackDurationPcnt +
+                      gameMidfieldDurationPcnt +
+                      gameDefenceDurationPcnt +
+                      ppmPcnt +
+                      attackPlayPcnt +
+                      backPlayPcnt +
+                      sidePlayPcnt +
+                      fwdPlayPcnt +
+                      backPassPcnt +
+                      sidePassPcnt +
+                      fwdPassPcnt +
+                      noPassPlayPcnt +
+                      passPlayPcnt +
+                      playsPcnt +
+                      Plays1_3PassesPcnt +
+                      Plays4_6PassesPcnt +
+                      Plays7PlusPassesPcnt +
+                      playsAttTurnPcnt ,
+                      data = trainset, 
+                      importance=TRUE, ntree=2000, #xtest=testset[, !(colnames(testset) %in% c("ID", 'default'))],
+                      keep.forest = T)
+footy_match_game$probability = predict(tx.rf, newdata = footy_match_game, type = "response")
+footy_match_game$prob  = predict(tx.rf, newdata = footy_match_game, type = "prob")
+footy_match_game$predicted = ifelse(footy_match_game$probability < 0.5, 0, 1)
+
+testset$probability = predict(tx.rf, newdata = testset, type = "response")
+testset$prob  = predict(tx.rf, newdata = testset, type = "prob")
+
+table(testset$default, testset$probability)
+
+trainset[is.na(trainset), ]
+
+new_DF <- trainset[rowSums(is.na(trainset)) > 0,]
+new_df1 <- FootyGames[is.na(FootyGames$isSidePass) > 0,]
 footy_match_game <- footy_match_play %>%
   group_by(competition, gameID) %>%
   mutate(gameDate= min(gameDate),
@@ -508,7 +703,9 @@ footy_match_game <- footy_match_game[!footy_match_game$competition == "2017 Mens
 
 # Run RandomForest and remove ID field as this is NOT a predictor
 footy_match_game$result <- as.factor(footy_match_game$result)
-footy_match_game$default = as.factor(ifelse(footy_match_game$result == "Loss", 0, ifelse(footy_match_game$result == "Win", 2, 1)))
+footy_match_game$default = as.factor(as.numeric(ifelse(footy_match_game$result == "Loss", 0, ifelse(footy_match_game$result == "Win", 2, 1))))
+footy_match_game_test <- footy_match_game %>% filter(playByUs == "true")
+
 unique(footy_match_game$competition)
 trainset = footy_match_game[!footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", 
                                                                  "2019 NSFA 1 Boys Under 13", 
@@ -517,6 +714,30 @@ trainset = footy_match_game[!footy_match_game$competition %in% c("2019 NSFA 1 Gi
                                                                 "2019 Boys Under 14"                ,        
                                                                 "2019 Icc Football Mens Open"
                                                                 ), ]
+
+library(DMwR)
+library(caret)
+# Since positive Target is small, use SMOTE to rebalance the class in Training Set
+trainset$competition <- as.factor(trainset$competition)
+trainset$gameID <- as.factor(trainset$gameID)
+trainset$gameDate <- as.factor(trainset$gameDate)
+trainset$playByUs <- as.factor(trainset$playByUs)
+trainset$teamName <- as.factor(trainset$teamName)
+trainset$prob <- NULL
+
+?SMOTE
+smote_train <- SMOTE(default ~ ., data  = as.data.frame(trainset),
+                     perc.over = 400, perc.under = 200
+)
+table(trainset$default)
+table(smote_train$default)
+# Perform Logistic regression, removing ID and correlated fields and other fields with a high p-value
+tx.glm = glm(formula = Target ~ . -ID -total_paid_services -total_services -sched_serv_warr -non_sched_serv_warr
+             -num_dealers_visited,
+             data = smote_train,
+             family = "binomial")
+
+
 testset = footy_match_game[footy_match_game$competition %in% c("2019 NSFA 1 Girls Under 16", "2019 NSFA 1 Boys Under 13", "2019 World Cup 2019 Mens Open",             
                                                                "2019 International Friendly Mens Open"   ,  
                                                                "2019 Boys Under 14"                ,        
@@ -526,7 +747,7 @@ tx.rf <- randomForest(default ~ playInto17Diff + playInto14Diff +
                         playAttTurnDiff +
                         playIntoAttackDiff + 
                         passesPerMinutePcntDiff +
-                    #    playIntoPenaltyDiff +
+                        playIntoPenaltyDiff +
                         passesPerMinuteMidPcntDiff +
                         passesPerMinuteAttPcntDiff + 
                         passesPerMinuteDefPcntDiff + 
@@ -549,6 +770,74 @@ table(testset$default, testset$probability)
 
 summary(tx.rf)
 varImpPlot(tx.rf)
+# Plot Partial Dependency plots
+partialPlot(tx.rf, testset, x.var = "playInto17Diff", which.class = "1")
+partialPlot(tx.rf, testset, x.var = "playInto14Diff", which.class = "1")
+partialPlot(tx.rf, testset, x.var = "LIMIT_BAL", which.class = "1")
+partialPlot(tx.rf, testset, x.var = "AMT_PC1", which.class = "1")
+
+install.packages("gbm")
+library(gbm)
+
+# defining some parameters
+gbm_depth = 10 #maximum nodes per tree
+gbm_n.min = 15 #minimum number of observations in the trees terminal, important effect on overfitting
+gbm_shrinkage=0.001 #learning rate
+cores_num = 8 #number of cores
+gbm_cv.folds=0 #number of cross-validation folds to perform
+num_trees = 10000
+
+smote_train$result <- NULL
+smote_train$competition <- NULL
+smote_train$gameID <- NULL
+smote_train$gameDate <- NULL
+smote_train$playByUs <- NULL
+smote_train$teamName <- NULL
+table(smote_train$default)
+
+?gbm
+  gbm_clf = gbm(default~playInto17Diff + playInto14Diff +
+                  playAttTurnDiff +
+                  playIntoAttackDiff + 
+                  passesPerMinutePcntDiff +
+                  playIntoPenaltyDiff +
+                  passesPerMinuteMidPcntDiff +
+                  passesPerMinuteAttPcntDiff + 
+                  passesPerMinuteDefPcntDiff + 
+                  possessionPcnt  + 
+                  Plays1_3Passes +
+                  Plays4_6Passes +
+                  Plays7PlusPasses +
+                  playsOpportunityPcnt,
+                data=smote_train,
+                #continuous response
+                n.trees=num_trees, #the number of GBM interaction
+                interaction.depth= gbm_depth,
+                n.minobsinnode = gbm_n.min, 
+                shrinkage=gbm_shrinkage, 
+                train.fraction = 0.5,
+                cv.folds=gbm_cv.folds,
+                verbose = FALSE, #print the preliminary output
+                n.cores = cores_num
+  )
+  summary(gbm_clf)
+  # Get AUC and Threshold for determining Prediction
+  testset$probability_gbm = predict(gbm_clf, testset, type = "response")
+  trainset$prob_gbm = predict(gbm_clf, trainset, type = "link")
+  Measures = model_evaluation(trainset, testset, gbm_clf, target = "default", plot_results=FALSE)
+  
+  predBST = predict(gbm_clf,n.trees=10000, newdata=testset,type='response')
+  
+  p.predBST <- apply(predBST, 1, which.max) - 1
+  testset$bst <- p.predBST
+  predRF = predict(tx.rf, newdata = testset, type = "prob")
+  
+  
+  table(testset$default, testset$probability)
+  summary(gbm_clf, ylab = "Variable", main = "Variable Relative Importance")
+  #OR just as a table
+  summary(gbm_clf)
+  
 names(tx.rf)
 comp <- "2019 NSFA 1 Boys Under 13"
 team <- "NFC Red"
@@ -809,3 +1098,21 @@ table(footy_match$byUs, ifelse(footy_match$pass == "true" &
 nrow(footy_match %>% filter(adjPass == 0 & pass == "true" & pseudoEvent == FALSE))
 nrow(footy_match %>% filter(adjPass == 1 & pass == "false" & pseudoEvent == FALSE))
 write.csv(footy_match, "data_out2.csv")
+
+unique(FG1$playByUs)
+FG1 <- FootyGames %>% filter(playByUs %in% c("true", "false") & isGoal == 1)
+pppxy <- ppp(FG1$lengthMetres, FG1$widthMetres, at="points",
+             c(0,110), c(0,75), checkdup=FALSE, marks=factor(FG1$playByUs))
+plot(density(pppxy, diggle=TRUE), multiplot=FALSE)
+plot(Smooth.ppp(pppxy), multiplot=FALSE)
+
+FG1 <- FootyGames %>% filter(playByUs %in% c("false") & isGoal == 1 &
+                               sequenceNumber == 1 & theirName == "North Sydney"
+                             )
+
+ggplot(FG1, aes(x = lengthMetres, y = widthMetres)) + 
+  stat_density2d(aes(fill=..density..), geom = "tile", contour = FALSE,
+                 lims=c(0, 0, 110, 75)) +
+  geom_point(size = 1, alpha = 0.5) + 
+  coord_fixed(xlim=c(0, 110), ylim=c(0, 75))+
+  scale_fill_gradient2(low = "white", high = "red")
