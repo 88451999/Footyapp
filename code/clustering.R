@@ -1,9 +1,21 @@
+library(tidyverse)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(zoo)
+library(lubridate)
+library(randomForest)
+library(factoextra)
+library(cluster)
+library(ggrepel)
+library(ggbeeswarm)
+
 setwd("/GitDev/Footyapp/data/") # use here function instead
 FootyGames1 <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
 team <- "NFC Red"
 
-FootyGames <- FootyGames1 %>% filter(competition %in% c("2019 NSFA 1 Girls Under 16", 
-                                                        #  "2019 NSFA 1 Boys Under 13", 
+FootyGames <- FootyGames1 %>% filter(competition %in% c(#"2019 NSFA 1 Girls Under 16", 
+                                                          "2019 NSFA 1 Boys Under 13", 
                                                         "2019 World Cup 2019 Mens Open",             
                                                         "2019 International Friendly Mens Open"   ,  
                                                         #  "2019 Boys Under 14"                ,        
@@ -12,11 +24,11 @@ FootyGames <- FootyGames1 %>% filter(competition %in% c("2019 NSFA 1 Girls Under
 )
 write.csv(FootyGames, "FootyGamesClus.csv", row.names = FALSE)
 
-FootyGames1 <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
+FootyGames1 <- read.csv("FootyGamesClus.csv", stringsAsFactors = FALSE)
 team <- "NFC Red"
 
-FootyGames <- FootyGames1 %>% filter(competition %in% c("2019 NSFA 1 Girls Under 16", 
-                    #  "2019 NSFA 1 Boys Under 13", 
+FootyGames <- FootyGames1 %>% filter(competition %in% c(#"2019 NSFA 1 Girls Under 16", 
+                      "2019 NSFA 1 Boys Under 13", 
                       "2019 World Cup 2019 Mens Open",             
                       "2019 International Friendly Mens Open"   ,  
                     #  "2019 Boys Under 14"                ,        
@@ -145,8 +157,29 @@ footy_match_pca <- footy_match_play %>%
                             TRUE ~ "Win")
   )
 
-fmpca <- footy_match_pca %>% filter(teamName == 'NFC Red')
-fmpca.pr <- prcomp(fmpca[c(8:10, 15:32)], center = TRUE, scale = TRUE)
+install.packages("Rtsne")
+library(Rtsne)
+fmpca[c( 14:18, 22:48)] <- lapply(fmpca[c(14:18, 22:48)], function(x) c(scale(x)))
+fmpca <- fmpca %>%
+  mutate_at(c( 14:18, 22:48), funs(c(scale(.))))
+is.na(fmpca[c( 14:18, 22:48)])
+tsne <- Rtsne(fmpca[c( 14:18, 22:48)], dims = 2, perplexity=3, verbose=TRUE, max_iter = 500)
+plot(tsne)
+plot(tsne$Y, main="tsne")
+
+fmpca$sne_X <- tsne$Y[, 1]
+fmpca$sne_Y <- tsne$Y[, 2]
+
+ggplot(fmpca, mapping = aes(x=sne_X, y=sne_Y, colour=competition)) +
+  geom_point() +
+geom_label_repel(aes(label=paste(teamName, result, theirName)), 
+                 box.padding = 0.5, point.padding =0.1, 
+                 segment.color = 'grey50', seed = 13,
+                 size=2)
+
+fmpca <- footy_match_pca  %>% filter(competition == "2019 NSFA 1 Boys Under 13")
+
+fmpca.pr <- prcomp(fmpca[c( 14:18, 22:48)], center = TRUE, scale = TRUE)
 summary(fmpca.pr)
 is.na(fmpca)
 screeplot(fmpca.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
@@ -162,22 +195,44 @@ legend("topleft", legend=c("Cut-off @ PC6"),
 
 plot(fmpca.pr$x[,1],fmpca.pr$x[,2], xlab="PC1 (44.3%)", ylab = "PC2 (19%)", main = "PC1 / PC2 - plot")
 
-install.packages("factoextra")
-library(factoextra)
+
+rownames(fmpca.pr)
 ?fviz_pca_ind
-fviz_pca_ind(fmpca.pr, geom.ind = "point", pointshape = 21, 
+fviz_pca_ind(fmpca.pr, geom.ind = c("point", "text"), 
+             pointshape = 21, 
              pointsize = 2, 
-             fill.ind = fmpca$result, #paste(fmpca$matchName, fmpca$result), 
+             fill.ind = ifelse(fmpca$competition=="2019 NSFA 1 Boys Under 13", 
+                               paste(ifelse(fmpca$playByUs == "true", "Us", "Opposition")),
+                               ifelse(fmpca$competition=="2019 Boys Under 14", "14s", 
+                                      "Top Flight Teams")), #paste(fmpca$matchName, fmpca$result), 
              col.ind = "black", 
-             palette = "jco", 
-             addEllipses = TRUE,
+             palette = "Dark2", 
+             addEllipses = FALSE,
              label = "var",
              col.var = "black",
              repel = TRUE,
              mean.point = FALSE,
              legend.title = "Result") +
-  ggtitle("2D PCA-plot from 30 feature dataset") +
-  theme(plot.title = element_text(hjust = 0.5))
+  ggtitle("2D PCA-plot") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  geom_label_repel(aes(label=paste(fmpca$teamName, fmpca$result, fmpca$theirName)), 
+                   box.padding = 0.1, point.padding =0.1, 
+                   segment.color = 'grey50', seed = 13,
+                   label.size = 0.1, size=2)
+
+unique(fmpca$competition)
+fviz_pca_biplot(fmpca.pr, geom = c("point", "text"),
+                col.var="green",
+                pointshape = 21, 
+                pointsize = 2, 
+                fill.ind = ifelse(fmpca$competition=="2019 NSFA 1 Boys Under 13", 
+                                  paste(ifelse(fmpca$playByUs == "true", "Us", "Opposition")),
+                                  ifelse(fmpca$competition=="2019 Boys Under 14", "14s", 
+                                  "Top Flight Teams")), #paste(fmpca$matchName, fmpca$result), 
+                alpha.var = 0.2, 
+                repel = TRUE,
+                mean.point = FALSE)+
+  theme_minimal()
 
 
 %>%
@@ -259,7 +314,8 @@ footy_match_pca <- footy_match_play %>%
                             TRUE ~ "Win")
   )
 
-fmpca <- as.data.frame(footy_match_pca)
+write.csv(fmpca,file="fmpca.csv", row.names = FALSE)
+fmpca <- as.data.frame(footy_match_pcac)
 rownames(fmpca) <- paste(gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl = TRUE), case_when(fmpca$teamName == "Beaconhill" ~ "B16",
                                                                                                     fmpca$teamName == "W Pymble" ~ "W16",
                                                                                                     fmpca$teamName == "NFC White" ~ "W16",
@@ -269,7 +325,17 @@ rownames(fmpca) <- paste(gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl
                                                                                                    fmpca$competition == "2019 Boys Under 14" ~ "14",
                                                                                                    TRUE ~ "") )
 
-fmpca.pr <- prcomp(fmpca[c(7:9, 15:31)], center = TRUE, scale = TRUE)
+rownames(fmpca.pr) <- paste(gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl = TRUE), case_when(fmpca$teamName == "Beaconhill" ~ "B16",
+                                                                                                    fmpca$teamName == "W Pymble" ~ "W16",
+                                                                                                    fmpca$teamName == "NFC White" ~ "W16",
+                                                                                                    fmpca$teamName == "STU" ~ "S16",
+                                                                                                    fmpca$competition == "2019 NSFA 1 Girls Under 16" ~ "16",
+                                                                                                    fmpca$competition == "2019 NSFA 1 Boys Under 13" ~ "13",
+                                                                                                    fmpca$competition == "2019 Boys Under 14" ~ "14",
+                                                                                                    TRUE ~ "") )
+
+
+fmpca.pr <- prcomp(fmpca[c(7:9, 16:48)], center = TRUE, scale = TRUE)
 summary(fmpca.pr)
 
 fviz_pca_ind(fmpca.pr, geom = c("point"),
@@ -296,8 +362,9 @@ fviz_pca_var(fmpca.pr, geom = c("point", "text"),
 
 
 #### K Means
-prcomp(fmpca[c(8:10, 15:32)], center = TRUE, scale = TRUE)
-m<-as.matrix(fmpca[c(7:9, 15:31)])
+prcomp(fmpca[c(8:10, 15:46)], center = TRUE, scale = TRUE)
+m<-as.matrix(fmpca[c( 14:18, 22:48)])
+m <- scale(m)
 #write as csv file
 write.csv(m,file="dtmAsMatrix.csv")
 #shorten rownames for display purposes
@@ -308,17 +375,11 @@ rownames(m) <- paste(substring(rownames(m),1,7),rep("..",nrow(m)),
 rownames(m) <- gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl = TRUE)
 d <- dist(m)
 
-streets <- c("Main", "Elm Road", "Riverbend over there", "Mario", "Frederick")
-
-# default abbreviations
-abbreviate(streets, 4)
-?abbreviate
-
 gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl = TRUE)
 
 #kmeans clustering
 #kmeans - run with nstart=100 and k=2,3,5 to compare results with hclust
-kfit <- kmeans(d, 8, nstart=100)
+kfit <- kmeans(d, 3, nstart=100)
 #plot - need library cluster
 library(cluster)
 clusplot(as.matrix(d), kfit$cluster, color=T, shade=T, labels=2, lines=0)
@@ -350,7 +411,7 @@ cosineSim <- function(x){
 cs <- cosineSim(m)
 cd <- 1-cs
 
-kfit <- kmeans(cd, 8, nstart=1000)
+kfit <- kmeans(cd, 3, nstart=100)
 
 clusplot(as.matrix(cd), kfit$cluster, color=T, shade=T, labels=2, lines=0)
 ?clusplot
@@ -369,7 +430,7 @@ plot(groups, hang=-1)
 rect.hclust(groups,2)
 
 # Visualize using factoextra
-fviz_dend(groups, k = 8, # Cut in 8 groups
+fviz_dend(groups, k = 3, # Cut in 8 groups
           cex = 0.5, # label size
           horiz= TRUE, rect = TRUE # Add rectangle around groups
 )
@@ -377,3 +438,22 @@ fviz_dend(groups, k = 8, # Cut in 8 groups
 fviz_cluster(kfit, cd, ellipse = TRUE, ellipse.alpha= 0.1,
              palette = "jco",repel = TRUE, ggtheme = theme_minimal(), 
              main= FALSE, xlab= FALSE, ylab = FALSE)
+
+install.packages("mclust")
+library(mclust)
+gmm.mclust <- Mclust(d, 3)
+plot(gmm.mclust)
+
+1
+str(d)
+, gaussian_comps = 3)
+
+test<-c(rnorm(1000),rnorm(1000,mean = 3,sd = 1))
+hist(test)
+a<-gmm(test,2)
+plot(a)
+write.csv(d,file="d.csv")
+str(d)
+, dist_mode = "eucl_dist",
+    seed_mode = "random_subset", km_iter = 10, em_iter = 5,
+    verbose = FALSE, var_floor = 1e-10, seed = 1)

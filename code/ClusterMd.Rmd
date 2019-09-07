@@ -106,7 +106,7 @@ footy_match_play$orderCol <- case_when(footy_match_play$teamName == team ~ 0,
 
 ```{r echo=FALSE, message=FALSE, eval=TRUE, fig.align ="center"}
 footy_match_pca <- footy_match_play %>%
-  group_by(competition, teamName, playByUs) %>%
+  group_by(competition, gameID, teamName, playByUs) %>%
   summarise(gameDate= min(gameDate),
             theirName = max(theirName),
             gameDuration = sum(possessionDuration),
@@ -140,19 +140,19 @@ footy_match_pca <- footy_match_play %>%
   ) 
 
 fmpca <- as.data.frame(footy_match_pca)
-rownames(fmpca) <- paste(gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl = TRUE), case_when(fmpca$teamName == "Beaconhill" ~ "H",
-                                                                                                    fmpca$teamName == "W Pymble" ~ "W",
-                                                                                                    fmpca$teamName == "NFC White" ~ "W",
-                                                                                                    fmpca$teamName == "STU" ~ "TU",
-                                                                                                   fmpca$competition == "2019 NSFA 1 Girls Under 16" ~ "16",
-TRUE ~ "") )
+#rownames(fmpca) <- paste(gsub('\\b(\\pL)\\pL{0,}|.','\\U\\1',fmpca$teamName,perl = TRUE), case_when(fmpca$teamName == "Beaconhill" ~ "H",
+                                                              #                                      fmpca$teamName == "W Pymble" ~ "W",
+                                                              #                                      fmpca$teamName == "NFC White" ~ "W",
+                                                               #                                     fmpca$teamName == "STU" ~ "TU",
+                                                                #                                   fmpca$competition == "2019 NSFA 1 Girls Under 16" ~ "16",
+#TRUE ~ "") )
 
 fmpca.pr <- prcomp(fmpca[c(7:9, 15:31)], center = TRUE, scale = TRUE)
 
-fviz_pca_ind(fmpca.pr, geom = c("point", "text"),
+fviz_pca_ind(fmpca.pr, geom = c("point"),
              pointshape = 21, 
              pointsize = 2, 
-             fill.ind = ifelse(fmpca$competition=="2019 NSFA 1 Girls Under 16", "16 Girls", "Others"), #paste(fmpca$matchName, fmpca$result), 
+             fill.ind = ifelse(fmpca$competition=="2019 NSFA 1 Boys Under 13", ifelse(fmpca$), "Top Flight Teams"), #paste(fmpca$matchName, fmpca$result), 
              col.ind = "black", 
            #  palette = "Set1", 
              addEllipses = FALSE,
