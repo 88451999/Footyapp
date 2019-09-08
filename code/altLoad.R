@@ -372,19 +372,33 @@ FootyGames1 <- FootyGames %>% #filter(playNumber == 1) %>%
          isZone17Incursion = ifelse(sequenceNumber == maxSequenceNumber, 0, ifelse(zone!=17 & lead(zone) == 17 & byUs == lead(byUs), 1, 0)),
          isZone11PassIncursion = ifelse(sequenceNumber == maxSequenceNumber, 0, ifelse(zone!=11 & lead(zone) == 11 & adjPass == 1 & byUs == lead(byUs), 1, 0)),
          isBackKeeperPass = ifelse(sequenceNumber == maxSequenceNumber, 0, ifelse(zone!=2 & lead(zone) == 2 & adjPass == 1 & byUs == lead(byUs), 1, 0)),
+         playArea = case_when(lengthFraction <= 0.333333 ~ "Defence",
+                              lengthFraction >= 0.666667 ~ "Attack",
+                              TRUE ~ "Midfield"),
          Movement = case_when(playNumber == 0 ~ "",
                               sequenceNumber == maxSequenceNumber ~ "",
-                              adjPass == 1 & lengthFraction < 0.333333 &
-                                lead(lengthFraction)  > 0.333333 & 
-                                lead(lengthFraction) < 0.666667 ~ "D-M",
-                              adjPass == 1 & lengthFraction > 0.333333 & lengthFraction < 0.666667 &
-                                lead(lengthFraction) < 0.333333 ~ "M-D",
-                              adjPass == 1 & lengthFraction > 0.333333 & lengthFraction < 0.666667 &
-                                lead(lengthFraction) >= 0.66666667 ~ "M-A",
-                              adjPass == 1 & lengthFraction >= 0.66666667 &
-                                lead(lengthFraction) > 0.333333 & 
-                                lead(lengthFraction) < 0.666667 ~ "A-M",
-                              TRUE ~ "")
+                              adjPass == 1 & playArea == 'Defence' &
+                                lead(playArea) == 'Midfield' ~ "D-M",
+                              adjPass == 1 & playArea == 'Midfield' &
+                                lead(playArea) == 'Defence' ~ "M-D",
+                              adjPass == 1 & playArea == 'Midfield' &
+                                lead(playArea) == 'Attack' ~ "M-A",
+                              adjPass == 1 & playArea == 'Attack' &
+                                lead(playArea) == 'Midfield' ~ "A-M",
+                              TRUE ~ ""),
+  #       Movement = case_when(playNumber == 0 ~ "",
+  #                            sequenceNumber == maxSequenceNumber ~ "",
+  #                            adjPass == 1 & lengthFraction < 0.333333 &
+  #                              lead(lengthFraction)  > 0.333333 & 
+  #                              lead(lengthFraction) < 0.666667 ~ "D-M",
+  #                            adjPass == 1 & lengthFraction > 0.333333 & lengthFraction < 0.666667 &
+  #                              lead(lengthFraction) < 0.333333 ~ "M-D",
+  #                            adjPass == 1 & lengthFraction > 0.333333 & lengthFraction < 0.666667 &
+  #                              lead(lengthFraction) >= 0.66666667 ~ "M-A",
+  #                            adjPass == 1 & lengthFraction >= 0.66666667 &
+  #                              lead(lengthFraction) > 0.333333 & 
+  #                              lead(lengthFraction) < 0.666667 ~ "A-M",
+  #                            TRUE ~ "")
   )
 
 footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
@@ -399,21 +413,29 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
             oppositionPhase = first(oppositionPhase),
             firstEvent = first(adjEventName),
             lastEvent = last(adjEventName),
-            Area = first(case_when(lengthFraction <= 0.333333 ~ "Defence",
-                                   lengthFraction >= 0.666667 ~ "Attack",
-                                   TRUE ~ "Midfield") ),
-            lastArea = last(case_when(lengthFraction <= 0.333333 ~ "Defence",
-                                      lengthFraction >= 0.666667 ~ "Attack",
-                                      TRUE ~ "Midfield") ),
+            Area = first(playArea),
+            lastArea = last(playArea),
             firstEventArea = paste(firstEvent, "-", Area),
             firstPenalyIncursion = first(penaltyIncursion),
             firstZone = first(zone),
             lastZone = last(zone),
             numSequences = max(sequenceNumber),
             numPlayers = max(player),
-            distance = sum(ifelse(lead(byUs) == byUs &
-                                    lead(adjEventName) %in% c("first touch", "dribble", "shot", "goal"), 
+            distance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                    !lead(adjEventName) %in% c("goal kick", "sideline out"), 
                                   distanceToNextEventMetres, 0)),
+            attackDistance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                          !lead(adjEventName) %in% c("goal kick", "sideline out") &
+                                          playArea == 'Attack', 
+                                        distanceToNextEventMetres, 0)),
+            midfieldDistance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                          !lead(adjEventName) %in% c("goal kick", "sideline out") &
+                                          playArea == 'Midfield', 
+                                        distanceToNextEventMetres, 0)),
+            defenceDistance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                            !lead(adjEventName) %in% c("goal kick", "sideline out") &
+                                            playArea == 'Defence', 
+                                          distanceToNextEventMetres, 0)),
             isAttackIncursion = max(attackIncursion),
             isPenaltyIncursion = max(penaltyIncursion),
             isZone17Incursion = max(isZone17Incursion, na.rm=TRUE),
@@ -430,30 +452,25 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
             possessionDuration = sum(ifelse(pseudoEvent == FALSE &
                                               byUs == playByUs &
                                               eventName != "keeper", duration, 0)),
-            AttackDuration = sum(ifelse(pseudoEvent == FALSE &
-                                          byUs == playByUs &
-                                          eventName != "keeper" &
-                                          Area == "Attack", duration, 0)),
-            MidfieldDuration = sum(ifelse(pseudoEvent == FALSE &
-                                            byUs == playByUs &
-                                            eventName != "keeper" &
-                                            Area == "Midfield", duration, 0)),
-            DefenceDuration = sum(ifelse(pseudoEvent == FALSE &
-                                           byUs == playByUs &
-                                           eventName != "keeper" &
-                                           Area == "Defence", duration, 0)),
-            AttackHalfDuration = sum(ifelse(pseudoEvent == FALSE &
-                                              byUs == playByUs &
-                                              eventName != "keeper" &
+            AttackDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                                 !lead(adjEventName) %in% c("goal kick", "sideline out") &
+                                                 playArea == 'Attack', duration, 0)),
+            MidfieldDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                            !lead(adjEventName) %in% c("goal kick", "sideline out") &
+                                            playArea == 'Midfield', duration, 0)),
+            DefenceDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                           !lead(adjEventName) %in% c("goal kick", "sideline out") &
+                                           playArea == 'Defence', duration, 0)),
+            AttackHalfDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                              !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                               lengthMetres >= 55, duration, 0)),
-            DefenceHalfDuration = sum(ifelse(pseudoEvent == FALSE &
-                                               byUs == playByUs &
-                                               eventName != "keeper" &
+            DefenceHalfDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+                                               !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                                lengthMetres < 55, duration, 0)),
             playDuration = sum(duration),
-            attackPasses = sum(ifelse(Area == "Attack", adjPass), 0),
-            midfieldPasses = sum(ifelse(Area == "Midfield", adjPass), 0),
-            defencePasses = sum(ifelse(Area == "Defence", adjPass), 0),
+            attackPasses = sum(ifelse(playArea == "Attack", adjPass, 0)),
+            midfieldPasses = sum(ifelse(playArea == "Midfield", adjPass, 0)),
+            defencePasses = sum(ifelse(playArea == "Defence", adjPass, 0)),
             crossfieldPlay = ifelse(max(widthMetres) - min(widthMetres) > 50 &
                                       Area == "Defence", 1, 0),
             goals = sum(ifelse(adjEventName == "goal", 1, 0)),
@@ -478,35 +495,14 @@ footy_match_play$orderCol <- case_when(footy_match_play$teamName == team ~ 0,
                                        footy_match_play$competition=="2019 International Friendly Mens Open" ~ 2,
                                        footy_match_play$competition=="2019 Icc Football Mens Open" ~ 3,
                                        TRUE ~ 4)
-         
-          summarise(playByUs = first(byUs),
-            matchName = first(matchName),
-            gameDate = first(ymd(substr(time, 1, 10))),
-            usPhase = first(usPhase),
-            oppositionPhase = first(oppositionPhase),
-            firstEvent = first(adjEventName),
-            lastEvent = last(adjEventName),
-            Area = first(case_when(lengthFraction <= 0.333333 ~ "Defence",
-                                   lengthFraction >= 0.666667 ~ "Attack",
-                                   TRUE ~ "Midfield") ),
-            firstEventArea = paste(firstEvent, "-", Area),
-            firstPenaltyIncursion = first(penaltyIncursion),
-            firstAttackIncursion = first(AttackIncursion),
-            numSequences = max(sequenceNumber),
-            numPlayers = max(player),
-            isAttackIncursion = max(attackIncursion),
-            isPenaltyIncursion = max(penaltyIncursion),
-            playPhase = first(ifelse(playByUs == "true", usPhase, oppositionPhase)),
-            totalPasses = sum(adjPass),
-            possessionDuration = sum(ifelse(pseudoEvent == FALSE &
-                                              byUs == playByUs &
-                                              eventName != "keeper", duration, 0)),
-            playDuration = sum(duration),
-            goals = sum(ifelse(adjEventName == "goal", 1, 0)),
-            shots = sum(ifelse(adjEventName == "shot", 1, 0)),
-            backPassTurn = )
+write.csv(FootyGames1, "FootyGames1Full.csv", row.names = FALSE)
+write.csv(footy_match_play, "FootyMatchPlayFull.csv", row.names = FALSE)
+write.csv(FootyGames1 %>%
+            filter(competition == "2019 NSFA 1 Boys Under 13"), "FootyGames113.csv", row.names = FALSE)
+write.csv(footy_match_play %>%
+            filter(competition == "2019 NSFA 1 Boys Under 13"), "FootyMatchPlay13.csv", row.names = FALSE)
 
-          
+
 is.na(footy_match_play$crossfieldPlay)
 footy_match_pca <- footy_match_play %>%
   filter(competition %in% c(#"2019 NSFA 1 Girls Under 16", 
