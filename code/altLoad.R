@@ -361,7 +361,13 @@ FootyGames1 <- FootyGames %>% #filter(playNumber == 1) %>%
   group_by(gameID, competition, ourName, theirName, playNumber) %>%
   arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
   mutate(maxSequenceNumber = max(sequenceNumber),
+         isAttackIncursion = max(attackIncursion),
+         isGoal = ifelse(last(adjEventName == "goal"), 1, 0),
          numberPasses = sum(adjPass),
+         playByUs = first(byUs),
+         firstEvent = first(adjEventName),
+         lastEvent = last(adjEventName),
+         matchName = paste(format(ymd(substr(time, 1, 10)), "%d/%m/%y"), "-", theirName),
          backPassTurnover = ifelse(isBackPass == 1 & sequenceNumber == 1 & adjEventName == "first touch", 1, 0),
          fwdPassTurnover = ifelse(isFwdPass == 1 & sequenceNumber == 1 & adjEventName == "first touch", 1, 0),
          sidePassTurnover = ifelse(isSidePass == 1 & sequenceNumber == 1 & adjEventName == "first touch", 1, 0),
@@ -405,7 +411,7 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
   group_by(gameID, competition, ourName, theirName, playNumber) %>%
   arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
   summarise(gameDate = first(kickoff_date),
-            playByUs = first(byUs),
+            playByUs = first(playByUs),
             matchName = first(matchName),
             teamName = first(ifelse(playByUs == "true", ourName, theirName)),
             usPhase = first(usPhase),
@@ -437,6 +443,7 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
                                             playArea == 'Defence', 
                                           distanceToNextEventMetres, 0)),
             isAttackIncursion = max(attackIncursion),
+            isGoal = max(isGoal),
             isPenaltyIncursion = max(penaltyIncursion),
             isZone17Incursion = max(isZone17Incursion, na.rm=TRUE),
             isZone14Incursion = ifelse(isZone17Incursion == 1, 0, max(isZone14Incursion, na.rm=TRUE)),
