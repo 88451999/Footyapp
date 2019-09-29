@@ -1,30 +1,48 @@
+# ======================================
+# Load and Transform Football Data
+#
+# This script will load games from the history file
+# and from the data.csv download of 'current' games
+# and then enhance with new columns.
+# Then events will be rolled up to play sequences
+# and finally to game/team/age level for age 
+# statistics and clustering
+#
+# ======================================
 library(tidyverse)
 library(readr)
 library(dplyr)
+library(stringr)
 library(ggplot2)
 library(zoo)
 library(lubridate)
 library(randomForest)
 
-setwd("/GitDev/Footyapp/data/") # use here function instead
-FootyGames <- data.frame()
-#if(file.exists("FootyGamesFull.csv")){
-#  FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
-#}
+setwd("/GitDev/Footyapp/data/") 
 
+FootyGames <- data.frame()
+# Read in the full history of games that have been 
+# converted to the new format so far
+if(file.exists("FootyGamesFull.csv")){
+  FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
+}
+
+# Read in the output from the app.  This may contain games
+# that have already been converted as it is a full history
 footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
-#footy <- read.csv("data.csv", sep = "|", stringsAsFactors = FALSE)
-footy <- footy %>% filter(competition != "2019 NSFA 1 Girls Under 16")
+
+# Find the unique games that have not been converted so far
 games <- unique(footy[! footy$gameID %in% FootyGames$gameID, ]$gameID)
 
-#footy_match <- footy %>% filter(ourName == " Socceroos")
-#footy_match <- footy
 print(paste("Number of games -", length(games)))
 
+# Loop through the games to convert
 for (j in 1:length(games)) {
   print(paste(j, games[j]))
+  # Get just the game being converted on this iteration
   footy_match <- footy %>% filter(gameID == games[j])
   
+  # Initialise fields
   kickoff = FALSE
   prevPlayNumber = 0
   half = 1
@@ -44,6 +62,8 @@ for (j in 1:length(games)) {
   footy_match$usPhase = ""
   footy_match$oppositionPhase = ""
   footy_match$pseudoEvent = FALSE
+  # Adjust events to make dribbles into first touches
+  # if they are too fast or too long
   footy_match$adjEventName = case_when(footy_match$eventName != "dribble" ~ footy_match$eventName,
                                        footy_match$distanceToNextEventMetres / footy_match$duration > 8 ~ "first touch",
                                        footy_match$distanceToNextEventMetres > 15 ~ "first touch",
@@ -53,22 +73,28 @@ for (j in 1:length(games)) {
   footy_match$maxSeq = 0
   footy_match$isAttackIncursion = 0
   footy_match$isGoal = 0
-  footy_match$totPass = 0
   footy_match$firstEvent = ""
   footy_match$playByUs = ""
   footy_match$matchName = ""
   
+  # For each event, figure out what it is
   for (i in 1:nrow(footy_match)) {
     
     footy_match[i, ]$half = half
+    # There may be a change ends event before the game starts
+    # so wait for the actual kickoff..
     if (!kickoff) {
+      # kick off is the start of the game, set this as the adjusted event
       if (footy_match[i, ]$adjEventName == "first touch" ) {
         footy_match[i, ]$adjEventName = "kick off"
         kickoff = TRUE
+        # 1st event of the game
         footy_match[i, ]$playNumber = 1
         footy_match[i, ]$sequenceNumber = 1
         footy_match[i, ]$player = 1
         
+        # Determine who has the ball so which team is in
+        # possession and which team is opposing
         if (footy_match[i, ]$byUs == "true") {
           footy_match[i, ]$usPhase = "BP"
           footy_match[i, ]$oppositionPhase = "BPO"
@@ -77,16 +103,17 @@ for (j in 1:length(games)) {
           footy_match[i, ]$oppositionPhase = "BP"
         } 
       }
-      # If after the kickoff then decide what has happened
+    # If after the kickoff then decide what has happened
     } else {
+      # The end of the half or game, so increment half
       if (footy_match[i, ]$adjEventName %in% c("change ends", "finish")) {
-        print("change ends")
         if (footy_match[i, ]$adjEventName == "change ends") {
           half = half + 1
         }
+      # Previous event was a side out, so this event is a throw in
       } else if (footy_match[i-1, ]$adjEventName %in% c("sideline out", "sideline out defence") &
                  footy_match[i, ]$adjEventName == "first touch") {       
-        footy_match[i, ]$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
+        # Start of a new play sequence
         footy_match[i, ]$playNumber = prevPlayNumber + 1
         footy_match[i, ]$sequenceNumber = 1
         footy_match[i, ]$player = 1
@@ -99,6 +126,9 @@ for (j in 1:length(games)) {
           footy_match[i, ]$oppositionPhase = "BP"
         } 
         
+      # if previous event was a goal kick which means the
+      # attacking team put the ball over the base line
+      # then this event is a goal kick
       } else if (footy_match[i-1, ]$adjEventName == "goalkick" &
                  footy_match[i, ]$adjEventName == "first touch") {
         footy_match[i, ]$playNumber = prevPlayNumber + 1
@@ -112,6 +142,9 @@ for (j in 1:length(games)) {
           footy_match[i, ]$usPhase = "BPO"
           footy_match[i, ]$oppositionPhase = "BP"
         } 
+        # if previous event was a corner which means the
+        # defending team put the ball over the base line
+        # then this event is a corner kick
       } else if (footy_match[i-1, ]$adjEventName == "corner" &
                  footy_match[i, ]$adjEventName == "first touch") {
         footy_match[i, ]$playNumber = prevPlayNumber + 1
@@ -125,6 +158,8 @@ for (j in 1:length(games)) {
           footy_match[i, ]$usPhase = "BPO"
           footy_match[i, ]$oppositionPhase = "BP"
         } 
+        # if previous event was a penalty
+        # then this event to restart is a penalty kick
       } else if (footy_match[i-1, ]$adjEventName == "penalty" &
                  footy_match[i, ]$adjEventName == "first touch") {
         footy_match[i, ]$playNumber = prevPlayNumber + 1
@@ -138,6 +173,8 @@ for (j in 1:length(games)) {
           footy_match[i, ]$usPhase = "BPO"
           footy_match[i, ]$oppositionPhase = "BP"
         } 
+      # If this event is keeper which means the keeper picks up the ball
+      # then the next event is a keeper punt
       } else if (footy_match[i, ]$adjEventName == "keeper") {
         # first touch is outside the penalty area so punt has been missed
         # Insert a kick..
@@ -146,7 +183,7 @@ for (j in 1:length(games)) {
              footy_match[i+1, ]$widthMetres < 17.34) &
             !(footy_match[i+1, ]$adjEventName %in% c("change ends", "finish")) ) {
           
-          # Put in an end marker for this play when there is a turnover
+          # Create a keeper punt that was missed by the app
           footy_match[i, ]$playNumber = prevPlayNumber + 1
           footy_match[i, ]$sequenceNumber = 1
           footy_match[i, ]$player = 1
@@ -160,6 +197,10 @@ for (j in 1:length(games)) {
           }
           
         }
+      # If the next event is a keeper picking up the ball
+      # then make the previous event to be the keeper catch
+      # assuming the keeper just picks up the ball without running 
+      # with it.
       } else if (footy_match[i+1, ]$adjEventName == "keeper") {
         
         footy_match[i, ]$playNumber = prevPlayNumber 
@@ -187,11 +228,14 @@ for (j in 1:length(games)) {
           footy_match[i, ]$oppositionPhase = "BP"
         } 
         
+      # If the event is a foul then update the sequence number
       } else if (footy_match[i, ]$adjEventName %in% c("offside", "direct freekick", "indirect freekick")) {
         footy_match[i, ]$playNumber = prevPlayNumber
         footy_match[i, ]$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
         footy_match[i, ]$player = footy_match[i-1, ]$player
         
+      # If the previous event is a foul 
+      # then the restart is a foul restart
       } else if (footy_match[i-1, ]$adjEventName %in% c("offside", "direct freekick", "indirect freekick")) {
         footy_match[i, ]$playNumber = prevPlayNumber + 1
         footy_match[i, ]$sequenceNumber = 1
@@ -207,6 +251,8 @@ for (j in 1:length(games)) {
           footy_match[i, ]$oppositionPhase = "BP"
         } 
         
+      # If the previous event is a change of ends
+      # then this event is a kick off
       } else if (footy_match[i-1, ]$adjEventName == "change ends" &
                  footy_match[i, ]$adjEventName == "first touch") {
         footy_match[i, ]$playNumber = prevPlayNumber + 1
@@ -217,7 +263,7 @@ for (j in 1:length(games)) {
           footy_match[i, ]$usPhase = "BP"
           footy_match[i, ]$oppositionPhase = "BPO"
         } 
-        # Include action before sideline out/corner/goal kick as part of same play
+      # If a goal was scored then this event is a kick off
       } else if (footy_match[i-1, ]$adjEventName == "goal" &
                  footy_match[i, ]$adjEventName == "first touch") {
         footy_match[i, ]$playNumber = prevPlayNumber + 1
@@ -231,7 +277,7 @@ for (j in 1:length(games)) {
           footy_match[i, ]$usPhase = "BPO"
           footy_match[i, ]$oppositionPhase = "BP"
         } 
-        # Include action before sideline out/corner/goal kick as part of same play
+      # Include action before sideline out/corner/goal kick as part of same play
       } else if (footy_match[i+1, ]$adjEventName %in% c("sideline out", "corner", "goalkick") &
                  footy_match[i, ]$byUs != footy_match[i-1, ]$byUs) {
         footy_match[i, ]$playNumber = prevPlayNumber
@@ -243,6 +289,7 @@ for (j in 1:length(games)) {
           footy_match[i+1, ]$adjEventName = "sideline out defence"
         }
         
+      # else this is continuing the same play
       } else if (footy_match[i, ]$byUs == footy_match[i-1, ]$byUs) {
         footy_match[i, ]$sequenceNumber = footy_match[i-1, ]$sequenceNumber + 1
         footy_match[i, ]$playNumber = prevPlayNumber
@@ -255,11 +302,14 @@ for (j in 1:length(games)) {
                                               footy_match[i-1, ]$player,
                                             TRUE ~ footy_match[i-1, ]$player + 1)
         
-        # turnover ball
+      # turnover ball, so the same event is the end of play
+      # and the start of the next play
       } else {
         # Put in an end marker for this play when there is a turnover
         footy_extra = footy_match[i, ]
         footy_extra$pseudoEvent = TRUE
+        # For the opposition taking the ball, coordinates have changed
+        # so reverse to make them the same as the attacking teams
         footy_extra$lengthFraction = 1 - footy_extra$lengthFraction
         footy_extra$lengthMetres = 110 - footy_extra$lengthMetres 
         footy_extra$widthFraction = 1 - footy_extra$widthFraction
@@ -273,11 +323,13 @@ for (j in 1:length(games)) {
 
         footy_match <- rbind(footy_match, footy_extra)
         
+        # The start of the new play
         footy_match[i, ]$sequenceNumber = 1
         footy_match[i, ]$playNumber = prevPlayNumber + 1
         footy_match[i, ]$player = 1
         
         # Turnover and then straight back as turnover
+        # but cleared at least 10 metres then count as a Clearance
         if (footy_match[i, ]$byUs != footy_match[i+1, ]$byUs &
             footy_match[i, ]$distance >= 10 & footy_match[i, ]$lengthChangeMetres > 3 &
               footy_match[i, ]$lengthFraction <= 0.33) {
@@ -301,6 +353,7 @@ for (j in 1:length(games)) {
     if (footy_match[i, ]$playNumber > 0) {
       prevPlayNumber = footy_match[i, ]$playNumber
       if (footy_match[i, ]$byUs == footy_match[i+1, ]$byUs) {
+        # Mark events as a completed pass between attacking team members
         if (footy_match[i, ]$adjEventName %in% c("throw in", "dribble", "kick off", "first touch", 
                                                  "goal kick", "keeper punt", "corner kick",
                                                  "offside restart", "direct restart", "indirect restart") &
@@ -308,9 +361,11 @@ for (j in 1:length(games)) {
           footy_match[i, ]$adjPass = 1
         }
         
+        # If the play takes place in the attacking third, mark as attack incursion
         if (footy_match[i, ]$lengthFraction >= 0.66666667) {
           footy_match[i, ]$attackIncursion = 1
         }
+        # if the play takes place in the penalty area, mark as a penalty incursion
         if (footy_match[i, ]$lengthMetres >= (110 - 16.5) &
             footy_match[i, ]$widthMetres <= (75 - 17.34) &
             footy_match[i, ]$widthMetres >= 17.34) {
@@ -325,8 +380,11 @@ for (j in 1:length(games)) {
   
 }
 
+# If any events have NA direction or duration, then set to 0
 FootyGames[is.na(FootyGames$direction), ]$direction <- 0
+FootyGames[is.na(FootyGames$duration), ]$duration <- 0
 
+# Set direction of passes
 FootyGames$isBackPass <- ifelse(FootyGames$adjPass == 1 &
                                   FootyGames$lengthChangeMetres < 0 &
                                   (abs(FootyGames$direction) < 75 |  
@@ -338,6 +396,7 @@ FootyGames$isFwdPass <- ifelse(FootyGames$adjPass == 1 &
 FootyGames$isSidePass <- ifelse(FootyGames$adjPass == 1 &
                                   (abs(FootyGames$direction) >= 75 &  
                                      abs(FootyGames$direction) <= 105), 1, 0)
+# For forward passes, what was their length
 FootyGames$isPass10m <- ifelse(FootyGames$isFwdPass == 1 &
                                  FootyGames$distance <= 10, 1, 0)
 FootyGames$isPass10_20m <- ifelse(FootyGames$isFwdPass == 1 &
@@ -346,21 +405,31 @@ FootyGames$isPass10_20m <- ifelse(FootyGames$isFwdPass == 1 &
 FootyGames$isPass20m <- ifelse(FootyGames$isFwdPass == 1 &
                                  FootyGames$distance > 20, 1, 0)
 
-FootyGames$widthMetres = 75 - FootyGames$widthMetres 
-FootyGames$widthFraction = 1 - FootyGames$widthFraction 
+# For goals, make sure the length is at the end..
+FootyGames[FootyGames$adjEventName == "goal",]$lengthMetres <- 110
+FootyGames[FootyGames$adjEventName == "goal",]$lengthFraction <- 1
 
+# Set the zone (1-18) the play happened in
 FootyGames$zone <- (floor(ifelse(FootyGames$widthFraction== 1, 2, 
                                  FootyGames$widthFraction*3))+1)+(3*floor(ifelse(FootyGames$lengthFraction>= 1, 5, 
                                                                                  FootyGames$lengthFraction*6)))
+# write out the full set of games
+write.csv(FootyGames, "FootyGamesFull.csv", row.names = FALSE)
+
 
 FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
 
-FootyGames$kickoff_date = as.POSIXct(substr(FootyGames$time, 1, 19), format='%Y-%m-%d %H:%M:%S')
-
-FootyGames1 <- FootyGames %>% #filter(playNumber == 1) %>%
+# Now, taking the full set of games, add more enhancements
+footy_games_final <- FootyGames %>% 
   group_by(gameID, competition, ourName, theirName, playNumber) %>%
   arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
-  mutate(maxSequenceNumber = max(sequenceNumber),
+  mutate(kickoff_date = as.POSIXct(substr(FootyGames$time, 1, 19), format='%Y-%m-%d %H:%M:%S'),
+         age_group = word(competition,-1),
+         maxSequenceNumber = max(sequenceNumber),
+         # Reverse width so that it will display correctly
+         # Original coordinates has 0,0 as back left post
+         widthMetres = 75 - widthMetres,
+         widthFraction = 1 - widthFraction,
          isAttackIncursion = max(attackIncursion),
          isGoal = ifelse(last(adjEventName == "goal"), 1, 0),
          numberPasses = sum(adjPass),
@@ -391,25 +460,13 @@ FootyGames1 <- FootyGames %>% #filter(playNumber == 1) %>%
                                 lead(playArea) == 'Attack' ~ "M-A",
                               adjPass == 1 & playArea == 'Attack' &
                                 lead(playArea) == 'Midfield' ~ "A-M",
-                              TRUE ~ ""),
-  #       Movement = case_when(playNumber == 0 ~ "",
-  #                            sequenceNumber == maxSequenceNumber ~ "",
-  #                            adjPass == 1 & lengthFraction < 0.333333 &
-  #                              lead(lengthFraction)  > 0.333333 & 
-  #                              lead(lengthFraction) < 0.666667 ~ "D-M",
-  #                            adjPass == 1 & lengthFraction > 0.333333 & lengthFraction < 0.666667 &
-  #                              lead(lengthFraction) < 0.333333 ~ "M-D",
-  #                            adjPass == 1 & lengthFraction > 0.333333 & lengthFraction < 0.666667 &
-  #                              lead(lengthFraction) >= 0.66666667 ~ "M-A",
-  #                            adjPass == 1 & lengthFraction >= 0.66666667 &
-  #                              lead(lengthFraction) > 0.333333 & 
-  #                              lead(lengthFraction) < 0.666667 ~ "A-M",
-  #                            TRUE ~ "")
+                              TRUE ~ "")
   )
 
-footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
-  group_by(gameID, competition, ourName, theirName, playNumber) %>%
-  arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
+# Now, turn events into 1 row per play sequence, summarising various features
+footy_match_play <- footy_games_final %>% filter(playNumber != 0) %>%
+  group_by(gameID, competition, age_group, ourName, theirName, playNumber) %>%
+  arrange(gameID, competition, age_group, ourName, theirName, playNumber, sequenceNumber) %>%
   summarise(gameDate = first(kickoff_date),
             playByUs = first(playByUs),
             matchName = first(matchName),
@@ -427,18 +484,18 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
             lastZone = last(zone),
             numSequences = max(sequenceNumber),
             numPlayers = max(player),
-            distance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            distance = sum(ifelse(playByUs == byUs &
                                     !lead(adjEventName) %in% c("goal kick", "sideline out"), 
                                   distanceToNextEventMetres, 0)),
-            attackDistance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            attackDistance = sum(ifelse(playByUs == byUs &
                                           !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                           playArea == 'Attack', 
                                         distanceToNextEventMetres, 0)),
-            midfieldDistance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            midfieldDistance = sum(ifelse(playByUs == byUs &
                                           !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                           playArea == 'Midfield', 
                                         distanceToNextEventMetres, 0)),
-            defenceDistance = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            defenceDistance = sum(ifelse(playByUs == byUs &
                                             !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                             playArea == 'Defence', 
                                           distanceToNextEventMetres, 0)),
@@ -456,22 +513,21 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
             total10mPasses = sum(isPass10m),
             total10_20mPasses = sum(isPass10_20m),
             total20mPasses = sum(isPass20m),
-            possessionDuration = sum(ifelse(pseudoEvent == FALSE &
-                                              byUs == playByUs &
-                                              eventName != "keeper", duration, 0)),
-            AttackDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            possessionDuration = sum(ifelse(playByUs == byUs &
+                                              !lead(adjEventName) %in% c("goal kick", "sideline out"), duration, 0)),
+            AttackDuration = sum(ifelse(playByUs == byUs &
                                                  !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                                  playArea == 'Attack', duration, 0)),
-            MidfieldDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            MidfieldDuration = sum(ifelse(playByUs == byUs &
                                             !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                             playArea == 'Midfield', duration, 0)),
-            DefenceDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            DefenceDuration = sum(ifelse(playByUs == byUs &
                                            !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                            playArea == 'Defence', duration, 0)),
-            AttackHalfDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            AttackHalfDuration = sum(ifelse(playByUs == byUs &
                                               !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                               lengthMetres >= 55, duration, 0)),
-            DefenceHalfDuration = sum(ifelse(lead(byUs) == byUs & playByUs == byUs &
+            DefenceHalfDuration = sum(ifelse(playByUs == byUs &
                                                !lead(adjEventName) %in% c("goal kick", "sideline out") &
                                                lengthMetres < 55, duration, 0)),
             playDuration = sum(duration),
@@ -494,96 +550,119 @@ footy_match_play <- FootyGames1 %>% filter(playNumber != 0) %>%
             MDPlay = max(ifelse(Movement == "M-D", 1, 0)),
             DMPlay = max(ifelse(Movement == "D-M", 1, 0)),
             backKeeperPasses = sum(isBackKeeperPass),
-            clearances = sum(ifelse(adjEventName == "clearance", 1, 0))
+            clearances = sum(ifelse(adjEventName == "clearance", 1, 0)),
+            passZero = ifelse(totalPasses == 0, 1, 0),
+            pass1 = ifelse(totalPasses > 0 & totalPasses < 2, 1, 0),
+            pass2_3 = ifelse(totalPasses > 1 & totalPasses < 4, 1, 0),
+            pass4_6 = ifelse(totalPasses > 3 & totalPasses < 7, 1, 0),
+            pass7Plus = ifelse(totalPasses > 6, 1, 0)
             )
-footy_match_play$orderCol <- case_when(footy_match_play$teamName == team ~ 0,
-                                       footy_match_play$competition %in% c("2019 NSFA 1 Boys Under 13",
-                                                                           "2019 NSFA 1 Girls Under 16", "2019 Boys Under 14") ~ 1,
-                                       footy_match_play$competition=="2019 International Friendly Mens Open" ~ 2,
-                                       footy_match_play$competition=="2019 Icc Football Mens Open" ~ 3,
-                                       TRUE ~ 4)
-write.csv(FootyGames1, "FootyGames1Full.csv", row.names = FALSE)
+
+# Write out results
+write.csv(footy_games_final, "FootyGamesFinal.csv", row.names = FALSE)
 write.csv(footy_match_play, "FootyMatchPlayFull.csv", row.names = FALSE)
-write.csv(FootyGames1 %>%
+# Save cutdown versions for U13s and U16s for shiny App
+write.csv(footy_games_final %>%
             filter(competition == "2019 NSFA 1 Boys Under 13"), "FootyGames113.csv", row.names = FALSE)
 write.csv(footy_match_play %>%
             filter(competition == "2019 NSFA 1 Boys Under 13"), "FootyMatchPlay13.csv", row.names = FALSE)
+write.csv(footy_games_final %>%
+            filter(competition == "2019 NSFA 1 Girls Under 16"), "FootyGames116.csv", row.names = FALSE)
+write.csv(footy_match_play %>%
+            filter(competition == "2019 NSFA 1 Girls Under 16"), "FootyMatchPlay16.csv", row.names = FALSE)
 
-
-is.na(footy_match_play$crossfieldPlay)
-footy_match_pca <- footy_match_play %>%
-  filter(competition %in% c(#"2019 NSFA 1 Girls Under 16", 
-    "2019 NSFA 1 Boys Under 13", 
-    "2019 World Cup 2019 Mens Open",             
-    "2019 International Friendly Mens Open"   ,  
-    #  "2019 Boys Under 14"                ,        
-    "2019 Icc Football Mens Open",
-    "2019 Mens Open"
-  )
+# Then for shiny R app, summarise to 1 row per age group per us/opposition
+footy_games_age <- footy_match_play %>% filter(playNumber > 0) %>%
+  mutate(goalAttack = ifelse(isGoal == 1 & Area == "Attack", 1, 0),
+         goalMidfield = ifelse(isGoal == 1 & Area == "Midfield", 1, 0),
+         goalDefence = ifelse(isGoal == 1 & Area == "Defence", 1, 0),
+         goalTurnover = ifelse(isGoal == 1 & firstEvent == "first touch", 1, 0),
+         goalRestart = ifelse(isGoal == 1 & firstEvent != "first touch", 1, 0)
   ) %>%
+  group_by(age_group, playByUs) %>%
+  summarise_if(is.numeric, list(sum), na.rm = TRUE) %>%
+  mutate(ppm = totalPasses/(possessionDuration/60),
+         ppmAttack = attackPasses/(AttackDuration/60),
+         ppmMidfield = midfieldPasses/(MidfieldDuration/60),
+         ppmDefence = defencePasses/(DefenceDuration/60),
+         aveVelocity = distance/(possessionDuration),
+         attackVelocity = attackDistance/(AttackDuration),
+         midfieldVelocity = midfieldDistance/(MidfieldDuration),
+         defenceVelocity = defenceDistance/(DefenceDuration)
+  )
+write.csv(footy_games_age, "FootyMatchAgeFull.csv", row.names = FALSE)
+
+# =========================
+# Clustering Structures
+# =========================
+# Re-read full Plays per match, as a starting point..
+footy_match_play <- read.csv("FootyMatchPlayFull.csv", stringsAsFactors = FALSE)
+
+# Now summarise to 1 row per game per team, for clustering
+footy_match_cluster <- footy_match_play %>%
   group_by(competition, gameID, 
            teamName, playByUs) %>%
+  # Percentages are within each team, not across the game
   summarise(gameDate= min(gameDate),
             theirName = max(theirName),
+            matchName = max(matchName),
             gameDuration = sum(possessionDuration),
-            gameAttackDurationPcnt = sum(AttackDuration) / gameDuration,
-            gameMidfieldDurationPcnt = sum(MidfieldDuration) / gameDuration,
-            gameDefenceDurationPcnt = sum(DefenceDuration) / gameDuration,
-            gameDistance = sum(distance),
+            gameDistance = sum(distance, na.rm=TRUE),
             plays = n(),
             goals = sum(goals),
             shots = sum(shots),
-            ppm = sum(totalPasses)/sum(possessionDuration/60),
-            aveVelocity = gameDistance/(gameDuration/60),
-            attackPlayPcnt = sum(ifelse(Area == "Attack", 1, 0)) / plays,
-            midfieldPlayPcnt = sum(ifelse(Area == "Midfield", 1, 0)) / plays,
-            defencePlayPcnt = sum(ifelse(Area == "Defence", 1, 0)) / plays,
-            penaltyPlayPcnt = sum(ifelse(isPenaltyIncursion == 1, 1, 0)) / plays,
-            zone14PlayPcnt = sum(ifelse(isZone14Incursion == 1, 1, 0)) / plays,
-            zone17PlayPcnt = sum(ifelse(isZone17Incursion == 1, 1, 0)) / plays,
-            zone11PlayPcnt = sum(ifelse(isZone11PassIncursion == 1, 1, 0)) / plays,
-            backPassPcnt = sum(totalBackPasses) / sum(totalPasses),
-            sidePassPcnt = sum(totalSidePasses) / sum(totalPasses),
-            fwdPassPcnt = sum(totalFwdPasses) / sum(totalPasses),
-            Pass10mPcnt = sum(total10mPasses) / sum(total10mPasses + total10_20mPasses + total20mPasses),
-            Pass10_20mPcnt = sum(total10_20mPasses) / sum(total10mPasses + total10_20mPasses + total20mPasses),
-            Pass20mPcnt = sum(total20mPasses) / sum(total10mPasses + total10_20mPasses + total20mPasses),
-            noPassPlayPcnt = sum(ifelse(totalPasses == 0, 1, 0)) / plays,
-            passPlayPcnt = sum(ifelse(totalPasses > 1, 1, 0)) / plays,
-            Plays1PassesPcnt = sum(ifelse(totalPasses > 0 & totalPasses <= 1, 1, 0)) / plays,
-            Plays2_4PassesPcnt = sum(ifelse(totalPasses > 1 & totalPasses <= 5, 1, 0)) / plays,
-            Plays5_7PassesPcnt = sum(ifelse(totalPasses > 5 & totalPasses <= 7, 1, 0)) / plays,
-            Plays8PlusPassesPcnt = sum(ifelse(totalPasses > 7, 1, 0)) / plays,
-            crossfieldPlayPcnt = sum(crossfieldPlay) / plays,
-            backPassTurnoverPcnt = sum(backPassTurnover) / sum(backPassTurnover + fwdPassTurnover +
-                                                                 sidePassTurnover),
-            fwdPassTurnoverPcnt = sum(fwdPassTurnover) / sum(backPassTurnover + fwdPassTurnover +
-                                                               sidePassTurnover),
-            sidePassTurnoverPcnt = sum(sidePassTurnover) / sum(backPassTurnover + fwdPassTurnover +
-                                                                 sidePassTurnover),
-            rightAttackPcnt = sum(rightAttack) / sum(rightAttack + middleAttack +
-                                                       leftAttack),
-            middleAttackPcnt = sum(middleAttack) / sum(rightAttack + middleAttack +
-                                                         leftAttack),
-            leftAttackPcnt = sum(leftAttack) / sum(rightAttack + middleAttack +
-                                                     leftAttack),
-            #    defenceOut = ifelse(lastEvent == "sideline out defence", 1, 0),
-            MAPlayPcnt = sum(MAPlay) / sum(MAPlay + AMPlay +
-                                             MDPlay + DMPlay),
-            AMPlayPcnt = sum(AMPlay) / sum(MAPlay + AMPlay +
-                                             MDPlay + DMPlay),
-            MDPlayPcnt = sum(MDPlay) / sum(MAPlay + AMPlay +
-                                             MDPlay + DMPlay),
-            DMPlayPcnt = sum(DMPlay) / sum(MAPlay + AMPlay +
-                                             MDPlay + DMPlay),
-            useTurnover = sum(ifelse(playPhase == "BPO > BP" &
-                                     totalPasses > 1, 1, 0)) / 
-                               sum(ifelse(playPhase == "BPO > BP", 1, 0)),
-            backKeeperPassesPcnt = sum(backKeeperPasses) / 
-              sum(totalPasses),
-            clearancePcnt = sum(clearances) / plays,
-            playsAttTurn = sum(ifelse(Area == "Attack" & firstEvent == "first touch", 1, 0)),
-            matchName = max(matchName)
+            totalPasses = sum(totalPasses),
+            ppm = totalPasses/(gameDuration/60),
+            aveVelocity = gameDistance/(gameDuration),
+            
+            attackDuration_pcnt = sum(AttackDuration) / gameDuration,
+            midfieldDuration_pcnt = sum(MidfieldDuration) / gameDuration,
+            defenceDuration_pcnt = sum(DefenceDuration) / gameDuration,
+            AttackHalfDuration_pcnt = sum(AttackHalfDuration) / gameDuration,
+            DefenceHalfDuration_pcnt = sum(DefenceHalfDuration) / gameDuration,
+            attackDistance_pcnt = sum(attackDistance, na.rm=TRUE) / gameDistance,
+            midfieldDistance_pcnt = sum(midfieldDistance, na.rm=TRUE) / gameDistance,
+            defenceDistance_pcnt = sum(defenceDistance, na.rm=TRUE) / gameDistance,
+            isZone17Incursion_pcnt = sum(isZone17Incursion, na.rm=TRUE)/sum(isAttackIncursion),
+            isZone14Incursion_pcnt = sum(isZone14Incursion, na.rm=TRUE)/sum(isAttackIncursion),
+            isZone11PassIncursion_pcnt = sum(isZone11PassIncursion, na.rm=TRUE)/sum(isAttackIncursion),
+            totalBackPasses_pcnt = sum(totalBackPasses)/totalPasses,
+            totalFwdPasses_pcnt = sum(totalFwdPasses)/totalPasses,
+            totalSidePasses_pcnt = sum(totalSidePasses)/totalPasses,
+            total10mPasses_pcnt = sum(total10mPasses)/sum(total10mPasses +
+                                                            total10_20mPasses + total20mPasses),
+            total10_20mPasses_pcnt = sum(total10_20mPasses)/sum(total10mPasses +
+                                                                  total10_20mPasses + total20mPasses),
+            total20mPasses_pcnt = sum(total20mPasses)/sum(total10mPasses +
+                                                            total10_20mPasses + total20mPasses),
+            attackPasses_pcnt = sum(attackPasses)/totalPasses,
+            midfieldPasses_pcnt = sum(midfieldPasses)/totalPasses,
+            defencePasses_pcnt = sum(defencePasses)/totalPasses,
+            crossfieldPlay_pcnt = sum(crossfieldPlay)/sum(defencePasses),
+            backPassTurnover_pcnt = sum(backPassTurnover)/sum(backPassTurnover + 
+                                                     sidePassTurnover + fwdPassTurnover),
+            fwdPassTurnover_pcnt = sum(fwdPassTurnover)/sum(backPassTurnover + 
+                                                               sidePassTurnover + fwdPassTurnover),
+            sidePassTurnover_pcnt = sum(sidePassTurnover)/sum(backPassTurnover + 
+                                                                sidePassTurnover + fwdPassTurnover),
+            rightAttack_pcnt = sum(rightAttack)/sum(rightAttack + 
+                                          middleAttack + leftAttack),
+            middleAttack_pcnt = sum(middleAttack)/sum(rightAttack + 
+                                                  middleAttack + leftAttack),
+            leftAttack_pcnt = sum(middleAttack)/sum(rightAttack + 
+                                                      middleAttack + leftAttack),
+            MAPlay_pcnt = sum(MAPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            AMPlay_pcnt = sum(AMPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            MDPlay_pcnt = sum(MDPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            DMPlay_pcnt = sum(DMPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            backKeeperPasses_pcnt = sum(backKeeperPasses)/sum(totalBackPasses),
+            clearances_pcnt = sum(clearances)/plays,
+            passZero_pcnt = sum(passZero)/plays,
+            passPlay_pcnt = 1 - passZero_pcnt,
+            pass1_pcnt = sum(pass1)/plays,
+            pass2_3_pcnt = sum(pass2_3)/plays,
+            pass4_6_pcnt = sum(pass4_6)/plays,
+            pass7Plus_pcnt = sum(pass7Plus)/plays
   ) %>%
   ungroup () %>%
   group_by(competition, gameID) %>%
@@ -592,81 +671,77 @@ footy_match_pca <- footy_match_play %>%
                             goals/sum(goals) < 0.5 ~ "Loss",
                             TRUE ~ "Win")
   )
-footy_match_pca <- footy_match_pca %>%
-  select(-gameID, everything())
 
-footy_match_pcac <- footy_match_play %>%
-  filter(competition %in% c(#"2019 NSFA 1 Girls Under 16", 
-    "2019 NSFA 1 Boys Under 13", 
-    "2019 World Cup 2019 Mens Open",             
-    "2019 International Friendly Mens Open"   ,  
-    #  "2019 Boys Under 14"                ,        
-    "2019 Icc Football Mens Open",
-    "2019 Mens Open"
-  )
-  ) %>%
-  group_by(competition, 
-           teamName, playByUs) %>%
+write.csv(footy_match_cluster, "FootyMatchCluster.csv", row.names = FALSE)
+
+
+# Then create 1 row per team for clustering
+footy_team_cluster <- footy_match_play %>%
+  group_by(competition, teamName, playByUs, age_group) %>%
   summarise(gameDate= min(gameDate),
             theirName = max(theirName),
+            matchName = max(matchName),
             gameDuration = sum(possessionDuration),
-            gameAttackDurationPcnt = sum(AttackDuration) / gameDuration,
-            gameMidfieldDurationPcnt = sum(MidfieldDuration) / gameDuration,
-            gameDefenceDurationPcnt = sum(DefenceDuration) / gameDuration,
-            gameDistance = sum(distance),
+            gameDistance = sum(distance, na.rm=TRUE),
             plays = n(),
             goals = sum(goals),
             shots = sum(shots),
-            ppm = sum(totalPasses)/sum(possessionDuration/60),
-            aveVelocity = gameDistance/(gameDuration/60),
-            attackPlayPcnt = sum(ifelse(Area == "Attack", 1, 0)) / plays,
-            midfieldPlayPcnt = sum(ifelse(Area == "Midfield", 1, 0)) / plays,
-            defencePlayPcnt = sum(ifelse(Area == "Defence", 1, 0)) / plays,
-            penaltyPlayPcnt = sum(ifelse(isPenaltyIncursion == 1, 1, 0)) / plays,
-            zone14PlayPcnt = sum(ifelse(isZone14Incursion == 1, 1, 0)) / plays,
-            zone17PlayPcnt = sum(ifelse(isZone17Incursion == 1, 1, 0)) / plays,
-            zone11PlayPcnt = sum(ifelse(isZone11PassIncursion == 1, 1, 0)) / plays,
-            backPassPcnt = sum(totalBackPasses) / sum(totalPasses),
-            sidePassPcnt = sum(totalSidePasses) / sum(totalPasses),
-            fwdPassPcnt = sum(totalFwdPasses) / sum(totalPasses),
-            Pass10mPcnt = sum(total10mPasses) / sum(total10mPasses + total10_20mPasses + total20mPasses),
-            Pass10_20mPcnt = sum(total10_20mPasses) / sum(total10mPasses + total10_20mPasses + total20mPasses),
-            Pass20mPcnt = sum(total20mPasses) / sum(total10mPasses + total10_20mPasses + total20mPasses),
-            noPassPlayPcnt = sum(ifelse(totalPasses == 0, 1, 0)) / plays,
-            passPlayPcnt = sum(ifelse(totalPasses > 1, 1, 0)) / plays,
-            Plays1PassesPcnt = sum(ifelse(totalPasses > 0 & totalPasses <= 1, 1, 0)) / plays,
-            Plays2_4PassesPcnt = sum(ifelse(totalPasses > 1 & totalPasses <= 5, 1, 0)) / plays,
-            Plays5_7PassesPcnt = sum(ifelse(totalPasses > 5 & totalPasses <= 7, 1, 0)) / plays,
-            Plays8PlusPassesPcnt = sum(ifelse(totalPasses > 7, 1, 0)) / plays,
-            crossfieldPlayPcnt = sum(crossfieldPlay) / plays,
-            backPassTurnoverPcnt = sum(backPassTurnover) / sum(backPassTurnover + fwdPassTurnover +
-                                                             sidePassTurnover),
-            fwdPassTurnoverPcnt = sum(fwdPassTurnover) / sum(backPassTurnover + fwdPassTurnover +
-                                                           sidePassTurnover),
-            sidePassTurnoverPcnt = sum(sidePassTurnover) / sum(backPassTurnover + fwdPassTurnover +
-                                                             sidePassTurnover),
-            rightAttackPcnt = sum(rightAttack) / sum(rightAttack + middleAttack +
-                                                   leftAttack),
-            middleAttackPcnt = sum(middleAttack) / sum(rightAttack + middleAttack +
-                                                     leftAttack),
-            leftAttackPcnt = sum(leftAttack) / sum(rightAttack + middleAttack +
-                                                 leftAttack),
-            #    defenceOut = ifelse(lastEvent == "sideline out defence", 1, 0),
-            MAPlayPcnt = sum(MAPlay) / sum(MAPlay + AMPlay +
-                                         MDPlay + DMPlay),
-            AMPlayPcnt = sum(AMPlay) / sum(MAPlay + AMPlay +
-                                         MDPlay + DMPlay),
-            MDPlayPcnt = sum(MDPlay) / sum(MAPlay + AMPlay +
-                                         MDPlay + DMPlay),
-            DMPlayPcnt = sum(DMPlay) / sum(MAPlay + AMPlay +
-                                         MDPlay + DMPlay),
-            useTurnover = sum(ifelse(playPhase == "BPO > BP" &
-                                       totalPasses > 1, 1, 0)) / 
-              sum(ifelse(playPhase == "BPO > BP", 1, 0)),
-            backKeeperPassesPcnt = sum(backKeeperPasses) / 
-              sum(totalPasses),
-            clearancePcnt = sum(clearances) / plays,
-            playsAttTurn = sum(ifelse(Area == "Attack" & firstEvent == "first touch", 1, 0)),
-            matchName = max(matchName)
-  ) 
-                                           
+            totalPasses = sum(totalPasses),
+            ppm = totalPasses/(gameDuration/60),
+            aveVelocity = gameDistance/(gameDuration),
+            
+            attackDuration_pcnt = sum(AttackDuration) / gameDuration,
+            midfieldDuration_pcnt = sum(MidfieldDuration) / gameDuration,
+            defenceDuration_pcnt = sum(DefenceDuration) / gameDuration,
+            AttackHalfDuration_pcnt = sum(AttackHalfDuration) / gameDuration,
+            DefenceHalfDuration_pcnt = sum(DefenceHalfDuration) / gameDuration,
+            attackDistance_pcnt = sum(attackDistance, na.rm=TRUE) / gameDistance,
+            midfieldDistance_pcnt = sum(midfieldDistance, na.rm=TRUE) / gameDistance,
+            defenceDistance_pcnt = sum(defenceDistance, na.rm=TRUE) / gameDistance,
+            isZone17Incursion_pcnt = sum(isZone17Incursion, na.rm=TRUE)/sum(isAttackIncursion),
+            isZone14Incursion_pcnt = sum(isZone14Incursion, na.rm=TRUE)/sum(isAttackIncursion),
+            isZone11PassIncursion_pcnt = sum(isZone11PassIncursion, na.rm=TRUE)/sum(isAttackIncursion),
+            totalBackPasses_pcnt = sum(totalBackPasses)/totalPasses,
+            totalFwdPasses_pcnt = sum(totalFwdPasses)/totalPasses,
+            totalSidePasses_pcnt = sum(totalSidePasses)/totalPasses,
+            total10mPasses_pcnt = sum(total10mPasses)/sum(total10mPasses +
+                                                            total10_20mPasses + total20mPasses),
+            total10_20mPasses_pcnt = sum(total10_20mPasses)/sum(total10mPasses +
+                                                                  total10_20mPasses + total20mPasses),
+            total20mPasses_pcnt = sum(total20mPasses)/sum(total10mPasses +
+                                                            total10_20mPasses + total20mPasses),
+            attackPasses_pcnt = sum(attackPasses)/totalPasses,
+            midfieldPasses_pcnt = sum(midfieldPasses)/totalPasses,
+            defencePasses_pcnt = sum(defencePasses)/totalPasses,
+            crossfieldPlay_pcnt = sum(crossfieldPlay)/sum(defencePasses),
+            backPassTurnover_pcnt = sum(backPassTurnover)/sum(backPassTurnover + 
+                                                                sidePassTurnover + fwdPassTurnover),
+            fwdPassTurnover_pcnt = sum(fwdPassTurnover)/sum(backPassTurnover + 
+                                                              sidePassTurnover + fwdPassTurnover),
+            sidePassTurnover_pcnt = sum(sidePassTurnover)/sum(backPassTurnover + 
+                                                                sidePassTurnover + fwdPassTurnover),
+            rightAttack_pcnt = sum(rightAttack)/sum(rightAttack + 
+                                                      middleAttack + leftAttack),
+            middleAttack_pcnt = sum(middleAttack)/sum(rightAttack + 
+                                                        middleAttack + leftAttack),
+            leftAttack_pcnt = sum(middleAttack)/sum(rightAttack + 
+                                                      middleAttack + leftAttack),
+            MAPlay_pcnt = sum(MAPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            AMPlay_pcnt = sum(AMPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            MDPlay_pcnt = sum(MDPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            DMPlay_pcnt = sum(DMPlay)/sum(MAPlay + AMPlay + MDPlay + DMPlay),
+            backKeeperPasses_pcnt = sum(backKeeperPasses)/sum(totalBackPasses),
+            clearances_pcnt = sum(clearances)/plays,
+            passZero_pcnt = sum(passZero)/plays,
+            passPlay_pcnt = 1 - passZero_pcnt,
+            pass1_pcnt = sum(pass1)/plays,
+            pass2_3_pcnt = sum(pass2_3)/plays,
+            pass4_6_pcnt = sum(pass4_6)/plays,
+            pass7Plus_pcnt = sum(pass7Plus)/plays
+  ) %>%
+  ungroup ()
+
+write.csv(footy_team_cluster, "FootyTeamCluster.csv", row.names = FALSE)
+
+## ==== Cleanup ====
+rm(list = ls())
