@@ -34,16 +34,15 @@ setwd("/GitDev/Footyapp/data/") # use here function instead
 
 FootyGames <- read.csv("FootyGames113.csv", stringsAsFactors = FALSE)
 footy_match_play <- read.csv("FootyMatchPlay13.csv", stringsAsFactors = FALSE)
+footy_match_age <- read.csv("FootyMatchAgeFull.csv", stringsAsFactors = FALSE)
+
 FootyGames$orderDate <- ymd(substr(FootyGames$time, 1, 10))
 #write.csv(FootyGames, "FootyGamesUs2.csv", row.names = FALSE)
 
-FootyGames[FootyGames$adjEventName == "goal",]$lengthMetres <- 110
-FootyGames[FootyGames$adjEventName == "goal",]$lengthFraction <- 1
+#footy_match_play$teamName = ifelse(footy_match_play$playByUs == "true", footy_match_play$ourName, footy_match_play$theirName)
 
-footy_match_play$teamName = ifelse(footy_match_play$playByUs == "true", footy_match_play$ourName, footy_match_play$theirName)
-
-FootyGames$widthMetres = 75 - FootyGames$widthMetres 
-FootyGames$widthFraction = 1 - FootyGames$widthFraction 
+#FootyGames$widthMetres = 75 - FootyGames$widthMetres 
+#FootyGames$widthFraction = 1 - FootyGames$widthFraction 
 
 FootyGames$lengthMetres = ifelse(FootyGames$playByUs == "false", 110 - FootyGames$lengthMetres, FootyGames$lengthMetres)
 FootyGames$widthMetres = ifelse(FootyGames$playByUs == "false", 75 - FootyGames$widthMetres, FootyGames$widthMetres)
@@ -148,6 +147,60 @@ listGraphs[["RegionMoves"]] <- list(columns=c("MAPlay", "AMPlay", "MDPlay", "DMP
                                    title="Switch Between Regions",
                                    ylab="Plays",
                                    type="Both")
+listGraphs[["PassSequence"]] <- list(columns=c("passZero", "pass1", "pass2_3", "pass4_6", "pass7Plus"),
+                                    levels=c("pass7Plus", "pass4_6", "pass2_3", "pass1", "passZero"),
+                                    labels=c("7+", "4 - 6", "2 - 3", "1", "0"),
+                                    title="Number of Passes per Play",
+                                    ylab="Possession",
+                                    type="Both")
+listGraphs[["ppmAttack"]] <- list(columns=c("ppmAttack"),
+                            levels=c("ppmAttack"),
+                            labels=c("Passes Per Minute"),
+                            title="Passes Per Minute in Attack Zone",
+                            ylab="Passes",
+                            type="count")
+listGraphs[["ppmMidfield"]] <- list(columns=c("ppmMidfield"),
+                                  levels=c("ppmMidfield"),
+                                  labels=c("Passes Per Minute"),
+                                  title="Passes Per Minute in Midfield Zone",
+                                  ylab="Passes",
+                                  type="count")
+listGraphs[["ppmDefence"]] <- list(columns=c("ppmDefence"),
+                                  levels=c("ppmDefence"),
+                                  labels=c("Passes Per Minute"),
+                                  title="Passes Per Minute in Defence Zone",
+                                  ylab="Passes",
+                                  type="count")
+listGraphs[["attackVelocity"]] <- list(columns=c("attackVelocity"),
+                                 levels=c("attackVelocity"),
+                                 labels=c("Velocity"),
+                                 title="Velocity of Ball in Attack Zone",
+                                 ylab="Velocity",
+                                 type="count")
+listGraphs[["midfieldVelocity"]] <- list(columns=c("midfieldVelocity"),
+                                       levels=c("midfieldVelocity"),
+                                       labels=c("Velocity"),
+                                       title="Velocity of Ball in Midfield Zone",
+                                       ylab="Velocity",
+                                       type="count")
+listGraphs[["defenceVelocity"]] <- list(columns=c("defenceVelocity"),
+                                         levels=c("defenceVelocity"),
+                                         labels=c("Velocity"),
+                                         title="Velocity of Ball in Defence Zone",
+                                         ylab="Velocity",
+                                         type="count")
+listGraphs[["goalRegion"]] <- list(columns=c("goalAttack", "goalMidfield", "goalDefence"),
+                                        levels=c("goalAttack", "goalMidfield", "goalDefence"),
+                                        labels=c("Attack", "Midfield", "Defence"),
+                                        title="Zone Where Goals Start From",
+                                        ylab="Goals",
+                                        type="both")
+listGraphs[["goalTransition"]] <- list(columns=c("goalTurnover", "goalRestart"),
+                                   levels=c("goalTurnover", "goalRestart"),
+                                   labels=c("Turnover", "Restart"),
+                                   title="Play Where Goals Start From",
+                                   ylab="Goals",
+                                   type="both")
 
 stat_value = "stack"
 
@@ -172,6 +225,7 @@ ui <- dashboardPage(
             menuItem("Heatmap", tabName = "heatmap", icon = icon("th")),
             menuItem("Playmap", tabName = "playmap", icon = icon("th")),
             menuItem("Team Statistics", tabName = "teamstats", icon = icon("th")),
+            menuItem("Age Group Statistics", tabName = "agestats", icon = icon("th")),
             menuItem("Game Statistics", tabName = "gamestats", icon = icon("th"))
         )
     ),
@@ -185,7 +239,7 @@ ui <- dashboardPage(
             fluidPage(
             
             # Application title
-            titlePanel("Football Statistics Northbridge Under 16"),
+            titlePanel("Football Statistics Northbridge Under 13"),
             
             # Sidebar with a slider input for number of bins 
             sidebarLayout(
@@ -207,8 +261,8 @@ ui <- dashboardPage(
                                 "Opponent:",
                                 choices = c("All", unique(footy_match_play$theirName)),
                                 selected = "All" ),
-                    checkboxInput("theirStats", "Show Opponent Against us",
-                                  value = FALSE),
+                  #  checkboxInput("theirStats", "Show Opponent Against us",
+                  #                value = FALSE),
                     width = 3
                 ),
                 
@@ -337,7 +391,16 @@ ui <- dashboardPage(
                                           "Passes Per Minute" = "ppm", 
                                           "Play Speed" = "velocity",
                                           "Back to Keeper" = "backKeeper",
-                                          "Region Moves" = "RegionMoves"),
+                                          "Region Moves" = "RegionMoves",
+                                          "Passing Sequences" = "PassSequence", 
+                                          "Passes Per Minute (Attack)" = "ppmAttack", 
+                                          "Passes Per Minute (Midfield)" = "ppmMidfield",
+                                          "Passes Per Minute (Defence)" = "ppmDefence", 
+                                          "Play Speed (Attack)" = "attackVelocity",
+                                          "Play Speed (Midfield)" = "midfieldVelocity", 
+                                          "Play Speed (Defence)" = "defenceVelocity", 
+                                          "Goals (Starting Region)" = "goalRegion", 
+                                          "Goals (Starting Event)" = "goalTransition"),
                               selected = "TurnoverDirection" ),
                   selectInput("tsFirstEvent",
                               "Phase Play:",
@@ -361,6 +424,67 @@ ui <- dashboardPage(
                 mainPanel(
                   plotOutput("teamPlot")#,
              #   plotOutput("teamPlotThem")
+                )
+              )
+            ) # fluidpage tabitem 3
+    ), # tab item 3
+    # Third tab content
+    tabItem(tabName = "agestats",
+            fluidPage(
+              
+              
+              # Application title
+              titlePanel("Football Statistics Northbridge Under 13"),
+              
+              # Sidebar with a slider input for number of bins 
+              sidebarLayout(
+                sidebarPanel(
+                  selectInput("asAttribute",
+                              "Statistic:",
+                              choices = c("Turnover Direction" = "TurnoverDirection",
+                                          "Attack Channel" = "AttackSides", 
+                                          "Pass Direction" = "PassDirection", 
+                                          "Pass Length" = "PassLength",
+                                          "Region Duration" = "RegionDuration",
+                                          "Region Distance" = "RegionDistance", 
+                                          "Region Passes" = "RegionPass", 
+                                          "Crossfield Plays" = "CrossfieldPlay", 
+                                          "Passes Per Minute" = "ppm", 
+                                          "Play Speed" = "velocity",
+                                          "Back to Keeper" = "backKeeper",
+                                          "Region Moves" = "RegionMoves",
+                                          "Passing Sequences" = "PassSequence", 
+                                          "Passes Per Minute (Attack)" = "ppmAttack", 
+                                          "Passes Per Minute (Midfield)" = "ppmMidfield",
+                                          "Passes Per Minute (Defence)" = "ppmDefence", 
+                                          "Play Speed (Attack)" = "attackVelocity",
+                                          "Play Speed (Midfield)" = "midfieldVelocity", 
+                                          "Play Speed (Defence)" = "defenceVelocity", 
+                                          "Goals (Starting Region)" = "goalRegion", 
+                                          "Goals (Starting Event)" = "goalTransition"),
+                              selected = "TurnoverDirection" ),
+                  selectInput("asFirstEvent",
+                              "Phase Play:",
+                              choices = c("All" = "all",
+                                          "Turnover" = "first touch",
+                                          "Throw In" = "throw in", 
+                                          "Goal Kick" = "goal kick", 
+                                          "Corner Kick" = "corner kick", 
+                                          "Kick Off" = "kick off",    
+                                          "Keeper Punt" = "keeper punt",
+                                          "Foul Restart" = "foul"),
+                              selected = "all" ),
+                  radioButtons("asType", "Statistic type:",
+                               c("Proportions" = "fill",
+                                 "Counts" = "stack"),
+                               selected = "fill"),
+                  width = 3
+                ),
+                
+                # Show a plot of the generated distribution
+                mainPanel(
+                  plotOutput("agePlot")#,
+                  #   plotOutput("teamPlotThem")
                 )
               )
             ) # fluidpage tabitem 3
@@ -430,10 +554,11 @@ server <- function(input, output) {
         if (input$Opponent != "All") {
             data <- data %>% filter(theirName == input$Opponent)
         }
-        ggplot(data %>% filter(playByUs == ifelse(input$theirStats, "false", "true")) %>% 
+        ggplot(data %>% #filter(playByUs == ifelse(input$theirStats, "false", "true")) %>% 
                    ungroup() %>% #group_by(ourName) %>%
+                 group_by(playByUs) %>%
         mutate(tp = n() ) %>%
-        group_by(totalPasses) %>%
+        group_by(totalPasses, playByUs) %>%
         summarise(perc = n() / max(tp), cnt = n(), max_tp = max(tp) ),
     aes(x=totalPasses, y= perc) ) +
         geom_bar(stat = "identity", fill = "light blue") +
@@ -441,7 +566,12 @@ server <- function(input, output) {
         theme(plot.title = element_text(hjust=0.5)) + 
         scale_y_continuous(labels = percent_format(accuracy = 1)) +
         labs(x = "Number of Passes", y = "Percentage", 
-             title = "Passes per Play - Us") 
+             title = "Passes per Play - Us") +
+          facet_grid(rows = vars(factor(playByUs,
+                                        ordered = TRUE,
+                                        levels = c("true", "false"),
+                                        labels = c("Us", "Opponents"))) )
+        
     })
     
     my_heat <- reactive({
@@ -623,7 +753,14 @@ server <- function(input, output) {
     
         
     my_team <- reactive({
-      data <- footy_match_play
+      data <- footy_match_play %>%
+        mutate(goalAttack = ifelse(isGoal == 1 & Area == "Attack", 1, 0),
+               goalMidfield = ifelse(isGoal == 1 & Area == "Midfield", 1, 0),
+               goalDefence = ifelse(isGoal == 1 & Area == "Defence", 1, 0),
+               goalTurnover = ifelse(isGoal == 1 & firstEvent == "first touch", 1, 0),
+               goalRestart = ifelse(isGoal == 1 & firstEvent != "first touch", 1, 0)
+               )
+      
       if (input$tsFirstEvent != "all") {
         if (input$tsFirstEvent == "foul") {
           eventsList <- c("offside restart", "direct restart", "indirect restart")
@@ -648,7 +785,8 @@ server <- function(input, output) {
                 aveVelocity = distance/(possessionDuration),
                 attackVelocity = attackDistance/(AttackDuration),
                 midfieldVelocity = midfieldDistance/(MidfieldDuration),
-                defenceVelocity = defenceDistance/(DefenceDuration))
+                defenceVelocity = defenceDistance/(DefenceDuration)
+                )
        
        HomeWins <- game_level  %>% 
          group_by(matchName, gameDate)  %>%
@@ -739,7 +877,7 @@ server <- function(input, output) {
          print("Defense")
          data <- data %>%
            gather(key = "TeamPossession", value = "TimePossesion",
-                  ourDefensivePossession-theirDefensivePossession, theirDefensivePossession-ourDefensivePossession)
+                  ourDefensivePossession, theirDefensivePossession)
        } else {
          print("Attack")
          data <- data  %>%
@@ -747,10 +885,9 @@ server <- function(input, output) {
                   ourAttackingPossession, theirAttackingPossession)
        }
        } else {
-         data <- data %>% mutate(ourNetPossession = ourPossession - theirPossession,
-                                theirNetPossession = theirPossession - ourPossession) %>%
+         data <- data  %>%
            gather(key = "TeamPossession", value = "TimePossesion",
-                  ourNetPossession, theirNetPossession)
+                  ourPossession, theirPossession)
          
        }
      
@@ -759,7 +896,83 @@ server <- function(input, output) {
        geom_line() 
    })
    
-
+   
+   my_age <- reactive({
+     data <- footy_match_age 
+     
+     if (input$asFirstEvent != "all") {
+       if (input$asFirstEvent == "foul") {
+         eventsList <- c("offside restart", "direct restart", "indirect restart")
+       } else {
+         eventsList <- input$asFirstEvent
+       }
+       data <- data %>% filter(firstEvent %in% eventsList)
+     }
+     data
+   })
+   
+   output$agePlot <- renderPlot({
+     print(paste(input$asAttribute, listGraphs[[input$asAttribute]]$type))
+     game_level <- my_age() #%>% filter(playNumber > 0) %>%
+#       group_by(age_group, playByUs) %>%
+#       summarise_if(is.numeric, list(sum), na.rm = TRUE) %>%
+#       mutate(ppm = totalPasses/(possessionDuration/60),
+#              ppmAttack = attackPasses/(AttackDuration/60),
+#              ppmMidfield = midfieldPasses/(MidfieldDuration/60),
+#              ppmDefence = defencePasses/(DefenceDuration/60),
+#              aveVelocity = distance/(possessionDuration),
+#              attackVelocity = attackDistance/(AttackDuration),
+#              midfieldVelocity = midfieldDistance/(MidfieldDuration),
+#              defenceVelocity = defenceDistance/(DefenceDuration)
+#       )
+     if (listGraphs[[input$asAttribute]]$type != "count") {
+       ggplot(game_level %>% 
+                gather(key = "Key", value = "Measurement",
+                       listGraphs[[input$asAttribute]]$columns),
+              aes(x=age_group, y= Measurement, 
+                  fill = factor(Key, ordered = TRUE,
+                                levels = listGraphs[[input$asAttribute]]$levels,
+                                labels = listGraphs[[input$asAttribute]]$labels) 
+              ) ) + 
+         geom_bar(position = input$asType, stat = "identity") +
+         scale_fill_discrete(name="") +
+         theme(axis.text.x = element_text(angle = 45, hjust = 1),
+               plot.title = element_text(hjust=0.5)) + 
+         labs(x = "Team", y = listGraphs[[input$asAttribute]]$ylab, 
+              title = listGraphs[[input$asAttribute]]$title,
+              legend = "") +
+         facet_grid(rows = vars(factor(playByUs,
+                                       ordered = TRUE,
+                                       levels = c("true", "false"),
+                                       labels = c("Us", "Opponents"))) )
+     } else {
+       #  print(paste(game_level$ppm, game_level$totalPasses, game_level$possessionDuration))
+       ggplot(game_level %>% 
+                gather(key = "Key", value = "Measurement",
+                       listGraphs[[input$asAttribute]]$columns),
+              aes(x=age_group, y= Measurement, 
+                  fill = factor(Key, ordered = TRUE,
+                                levels = listGraphs[[input$asAttribute]]$levels,
+                                labels = listGraphs[[input$asAttribute]]$labels) 
+              ) ) + 
+         geom_bar(position = "stack", stat = "identity") +
+         scale_fill_discrete(name="") +
+         theme(axis.text.x = element_text(angle = 45, hjust = 1),
+               plot.title = element_text(hjust=0.5)) + 
+         labs(x = "Team", y = listGraphs[[input$asAttribute]]$ylab, 
+              title = listGraphs[[input$asAttribute]]$title,
+              legend = "") +
+         facet_grid(rows = vars(factor(playByUs,
+                                       ordered = TRUE,
+                                       levels = c("true", "false"),
+                                       labels = c("Us", "Opponents"))) )
+       
+       
+       
+       
+     }
+   })
+   
     
 }
 
