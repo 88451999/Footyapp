@@ -14,32 +14,38 @@ footy_team_cluster <- read.csv("FootyTeamCluster.csv", stringsAsFactors = FALSE)
 # These are columns that to some extent the team can
 # control themselves
 cols = c('ppm', 'aveVelocity', 
-         'isZone17Incursion_pcnt', 'isZone14Incursion_pcnt', 'isZone11PassIncursion_pcnt',
-         'totalBackPasses_pcnt', 'totalFwdPasses_pcnt', 'totalSidePasses_pcnt',
-         'total10mPasses_pcnt', 'total10_20mPasses_pcnt', 'total20mPasses_pcnt',
-         'crossfieldPlay_pcnt', 'backPassTurnover_pcnt',
-         'fwdPassTurnover_pcnt', 'sidePassTurnover_pcnt',
-         'AMPlay_pcnt', 'MDPlay_pcnt', # Going backwards in zones
-         'backKeeperPasses_pcnt', 'clearances_pcnt',
-         'passZero_pcnt', 'passPlay_pcnt', 'pass1_pcnt',
-         'pass2_3_pcnt', 'pass4_6_pcnt', 'pass7Plus_pcnt')
+         'isZone17Incursion_pcnt', 'isZone14Incursion_pcnt', 
+         'isZone11PassIncursion_pcnt', 'totalBackPasses_pcnt', 
+         'totalFwdPasses_pcnt', 'totalSidePasses_pcnt',
+         'total10mPasses_pcnt', 'total10_20mPasses_pcnt', 
+         'total20mPasses_pcnt', 'crossfieldPlay_pcnt', 
+         'backPassTurnover_pcnt', 'fwdPassTurnover_pcnt', 
+         'sidePassTurnover_pcnt', 'AMPlay_pcnt', 
+         'MDPlay_pcnt', 'backKeeperPasses_pcnt', 
+         'clearances_pcnt', 'passZero_pcnt', 
+         'passPlay_pcnt', 'pass1_pcnt',
+         'pass2_3_pcnt', 'pass4_6_pcnt', 
+         'pass7Plus_pcnt')
 
 # Take subset of columns for cluster analysis
-ftc_cluster <- footy_team_cluster[, c("competition", "teamName", "playByUs", "age_group", cols)]#  %>% filter(competition == "2019 NSFA 1 Boys Under 13")
+ftc_cluster <- footy_team_cluster[, c("competition", "teamName", "playByUs", "age_group", cols)]
 
 # Rename columns for displaying
-colnames(ftc_cluster) <- c('competition', 'teamName', 'playByUs',
-                     'age_group',
-'Passes Per Minute', 'Velocity', 
-'Zone 17 Incursions', 'Zone 14 Incursions', 'Passes into Zone 11',
-'Back Pass', 'Forward Pass', 'Side Pass',
-'10m Passes', '10-20m Passes', '20m+ Passes',
-'Crossfield Play across Back', 'Back Pass from Turnover',
-'Forward Pass from Turnover', 'Side Pass from Turnover',
-'Attack to Midfield', 'Midfield to Defence',
-'Passes to Keeper', 'Clearances',
-'Plays with No Passes', 'Plays with Passes', 'Plays with 1 Pass',
-'Plays with 2-3 Passes', 'Plays with 4-6 Passes', 'Plays with 7+ Passes')
+colnames(ftc_cluster) <- c('competition', 'teamName', 
+              'playByUs', 'age_group',
+              'Passes Per Minute', 'Velocity', 
+              'Zone 17 Incursions', 'Zone 14 Incursions', 
+              'Passes into Zone 11', 'Back Pass', 
+              'Forward Pass', 'Side Pass',
+              '10m Passes', '10-20m Passes', 
+              '20m+ Passes', 'Crossfield Play across Back', 
+              'Back Pass from Turnover', 'Forward Pass from Turnover', 
+              'Side Pass from Turnover', 'Attack to Midfield', 
+              'Midfield to Defence', 'Passes to Keeper', 
+              'Clearances', 'Plays with No Passes', 
+              'Plays with Passes', 'Plays with 1 Pass',
+              'Plays with 2-3 Passes', 'Plays with 4-6 Passes', 
+              'Plays with 7+ Passes')
 
 # Filter on competitions to cluster
 ftc_cluster <- ftc_cluster %>%   
@@ -47,10 +53,8 @@ ftc_cluster <- ftc_cluster %>%
         #  "2019 NSFA 1 Boys Under 13", 
            "2019 World Cup 2019 Mens Open",             
            "2019 International Friendly Mens Open"   ,  
-    #      "2019 Boys Under 14"    #            ,        
            "2019 Icc Football Mens Open",
-           "2019 Mens Open"
-              )
+           "2019 Mens Open")
            )
 
 # ==============================
@@ -102,6 +106,7 @@ fviz_pca_biplot(ftpca.pr, geom = c("point", "text"),
 # ========================
 # K Means Clustering
 # ========================
+# Convert to matrix for distance calculations
 m<-as.matrix(ftc_cluster[ -c(1:4)])
 rownames(m) <- ftc_cluster$teamName
 # Scale all columns so each feature has equal importance in distance
@@ -138,112 +143,26 @@ fviz_dend(groups, k = 3,
           horiz= TRUE, rect = TRUE # Add rectangle around groups
          )
 
-
-install.packages("mclust")
-library(mclust)
-gmm.mclust <- Mclust(d, 3)
-plot(gmm.mclust)
-
-1
-str(d)
-, gaussian_comps = 3)
-
-test<-c(rnorm(1000),rnorm(1000,mean = 3,sd = 1))
-hist(test)
-a<-gmm(test,2)
-plot(a)
-write.csv(d,file="d.csv")
-str(d)
-, dist_mode = "eucl_dist",
-    seed_mode = "random_subset", km_iter = 10, em_iter = 5,
-    verbose = FALSE, var_floor = 1e-10, seed = 1)
-
+# ===================================================
+# T-distributed Stochastic Neighbor Embedding (t-SNE)
+# ===================================================
 library(Rtsne)
-fmpca[c( 5:29)] <- lapply(fmpca[c(5:29)], function(x) c(scale(x)))
-fmpca <- fmpca %>%
-  mutate_at(c( 5:29), funs(c(scale(.))))
-is.na(fmpca[c( 14:18, 22:48)])
-tsne <- Rtsne(fmpca[c( 5:29)], dims = 2, perplexity=3, verbose=TRUE, max_iter = 500)
-plot(tsne)
-plot(tsne$Y, main="tsne")
+# Make sure data is scaled before applying t-sne
+fmpca <- ftc_cluster %>%
+  mutate_at(-c(1:4), funs(c(scale(.))))
+tsne <- Rtsne(fmpca[-c(1:4)], dims = 2, perplexity=3, verbose=TRUE, max_iter = 500)
 
+# Get 2 dimensions for display
 fmpca$sne_X <- tsne$Y[, 1]
 fmpca$sne_Y <- tsne$Y[, 2]
 
+# Plot the 2 dimensions
 ggplot(fmpca, mapping = aes(x=sne_X, y=sne_Y, colour=competition)) +
   geom_point() +
-  geom_label_repel(aes(label=teamName), 
-                   box.padding = 0.5, point.padding =0.1, 
-                   segment.color = 'grey50', seed = 13,
-                   size=2)
-is.na(fmpca)
-screeplot(fmpca.pr, type = "l", npcs = 15, main = "Screeplot of the first 10 PCs")
-abline(h = 1, col="red", lty=5)
-legend("topright", legend=c("Eigenvalue = 1"),
-       col=c("red"), lty=5, cex=0.6)
-cumpro <- cumsum(fmpca.pr$sdev^2 / sum(fmpca.pr$sdev^2))
-plot(cumpro[0:15], xlab = "PC #", ylab = "Amount of explained variance", main = "Cumulative variance plot")
-abline(v = 6, col="blue", lty=5)
-abline(h = 0.88759, col="blue", lty=5)
-legend("topleft", legend=c("Cut-off @ PC6"),
-       col=c("blue"), lty=5, cex=0.6)
-
-plot(fmpca.pr$x[,1],fmpca.pr$x[,2], xlab="PC1 (44.3%)", ylab = "PC2 (19%)", main = "PC1 / PC2 - plot")
-
-
-rownames(fmpca.pr)
-?fviz_pca_ind
-fviz_pca_ind(ftpca.pr, geom.ind = c("point", "text"), 
-             pointshape = 21, 
-             pointsize = 2, 
-             fill.ind = ifelse(fmpca$competition=="2019 NSFA 1 Boys Under 13", 
-                               paste(ifelse(fmpca$playByUs == "true", "Us", "Opposition")),
-                               ifelse(fmpca$competition=="2019 Boys Under 14", "14s", 
-                                      "Top Flight Teams")), #paste(fmpca$matchName, fmpca$result), 
-             col.ind = "black", 
-             palette = "Dark2", 
-             addEllipses = FALSE,
-             label = "var",
-             col.var = "black",
-             repel = TRUE,
-             mean.point = FALSE,
-             legend.title = "Result") +
-  ggtitle("2D PCA-plot") +
-  theme(plot.title = element_text(hjust = 0.5)) +
-  geom_text_repel(aes(label=paste(fmpca$teamName)), 
+  geom_text_repel(aes(label=teamName), 
                   box.padding = 0.1, point.padding =0.1, 
                   segment.color = 'grey50', seed = 13,
-                  label.size = 0.1, size=2) 
+                  size=3.5)
 
-fviz_pca_var(ftpca.pr
-)  
-
-annotate("text", x = 4, y = c(3, 3.5, 4, 4.5, 5), label = topR) +
-  annotate("text", x = -3, y = c(3, 3.5, 4, 4.5), label = topL) +
-  annotate("text", x = 4, y = c(-3, -3.5, -4, -4.5, -5), label = BottomR) +
-  annotate("text", x = -3, y = c(-3, -3.5, -4, -4.5, -5), label = BottomL)
-
-topL = abc[abc$ranking <= 5 & abc$quadrant == "Top Left", ]$variable 
-BottomR = abc[abc$ranking <= 5 & abc$quadrant == "Bottom Right", ]$variable 
-BottomL = abc[abc$ranking <= 5 & abc$quadrant == "Bottom Left", ]$variable 
-
-topR
-
-res.var$contrib
-res.var$ei
-
-library(FactoMineR)
-pca_mod <- PCA(fmpca[, 4:28], ncp = 2, graph = TRUE)
-rownames(res.var$coord)
-abc <- res.var$coord[, 1] * res.var$coord[, 1] +
-  res.var$coord[, 2] * res.var$coord[, 2]
-
-
-rownames(abc)
-
-ind.var <- get_pca_ind(ftpca.pr)
-ind.var$coord
-unique(fmpca$competition)
-fviz_screeplot(ftpca.pr)
-get_eigenvalue(ftpca.pr)
-fmpca.pr$eig
+## ==== Cleanup ====
+rm(list = ls())
