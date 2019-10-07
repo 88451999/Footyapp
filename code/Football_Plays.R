@@ -331,6 +331,7 @@ for (j in 1:length(games)) {
         # Turnover and then straight back as turnover
         # but cleared at least 10 metres then count as a Clearance
         if (footy_match[i, ]$byUs != footy_match[i+1, ]$byUs &
+            !is.na(footy_match[i, ]$distance) &
             footy_match[i, ]$distance >= 10 & footy_match[i, ]$lengthChangeMetres > 3 &
             footy_match[i, ]$lengthFraction <= 0.33) {
           footy_match[i, ]$adjEventName = "clearance"
@@ -379,7 +380,7 @@ for (j in 1:length(games)) {
   FootyGames <- rbind(FootyGames, footy_match)
   
 }
-
+print (i)
 # If any events have NA direction or duration, then set to 0
 FootyGames[is.na(FootyGames$direction), ]$direction <- 0
 FootyGames[is.na(FootyGames$duration), ]$duration <- 0
@@ -423,8 +424,12 @@ FootyGames <- read.csv("FootyGamesFull.csv", stringsAsFactors = FALSE)
 footy_games_final <- FootyGames %>% 
   group_by(gameID, competition, ourName, theirName, playNumber) %>%
   arrange(gameID, competition, ourName, theirName, playNumber, sequenceNumber) %>%
-  mutate(kickoff_date = as.POSIXct(substr(FootyGames$time, 1, 19), format='%Y-%m-%d %H:%M:%S'),
-         age_group = word(competition,-1),
+  mutate(kickoff_date = as.POSIXct(substr(time, 1, 19), format='%Y-%m-%d %H:%M:%S'),
+         age_group = ifelse(competition %in% c("2019 World Cup 2019 Mens Open",             
+                                                  "2019 International Friendly Mens Open",        
+                                                  "2019 Icc Football Mens Open",
+                                                  "2019 Mens Open"), "Top-Flight",
+                            word(competition,-1)),
          maxSequenceNumber = max(sequenceNumber),
          # Reverse width so that it will display correctly
          # Original coordinates has 0,0 as back left post
@@ -557,6 +562,20 @@ footy_match_play <- footy_games_final %>% filter(playNumber != 0) %>%
             pass4_6 = ifelse(totalPasses > 3 & totalPasses < 7, 1, 0),
             pass7Plus = ifelse(totalPasses > 6, 1, 0)
   )
+
+#footy_games_final <- read.csv("FootyGamesFinal.csv", stringsAsFactors = FALSE)
+#footy_match_play <- read.csv("FootyMatchPlayFull.csv", stringsAsFactors = FALSE)
+write.csv(footy_games_final %>%
+            filter(competition %in% c("2019 World Cup 2019 Mens Open",             
+                                      "2019 International Friendly Mens Open",        
+                                      "2019 Icc Football Mens Open",
+                                      "2019 Mens Open")), "FootyGamesTop.csv", row.names = FALSE)
+write.csv(footy_match_play %>%
+            filter(competition %in% c("2019 World Cup 2019 Mens Open",             
+                                                  "2019 International Friendly Mens Open",        
+                                                  "2019 Icc Football Mens Open",
+                                                  "2019 Mens Open")), "FootyMatchPlayTop.csv", row.names = FALSE)
+
 
 # Write out results
 write.csv(footy_games_final, "FootyGamesFinal.csv", row.names = FALSE)

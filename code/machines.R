@@ -13,31 +13,32 @@ setwd("/GitDev/Footyapp/data/") # use here function instead
 footy_match_play <- read.csv("FootyMatchPlayFull.csv", stringsAsFactors = FALSE)
 
 team <- "NFC Red"
-#footy_match_play <- footy_match_play %>% 
-#                     mutate(passZero = ifelse(totalPasses == 0, 1, 0),
-#                           pass1 = ifelse(totalPasses > 0 & totalPasses < 2, 1, 0),
-#                           pass2_3 = ifelse(totalPasses > 1 & totalPasses < 4, 1, 0),
-#                           pass4_6 = ifelse(totalPasses > 3 & totalPasses < 7, 1, 0),
-#                           pass7Plus = ifelse(totalPasses > 6, 1, 0)
-#                          )
-footy_match_play$orderCol <- case_when(footy_match_play$teamName == team ~ 0,
-                                       footy_match_play$competition %in% c("2019 NSFA 1 Boys Under 13",
-                                                                           "2019 NSFA 1 Girls Under 16", "2019 Boys Under 14") ~ 1,
-                                       footy_match_play$competition=="2019 International Friendly Mens Open" ~ 2,
-                                       footy_match_play$competition=="2019 Icc Football Mens Open" ~ 3,
-                                       TRUE ~ 4)
+# Column for joining to create percentages over the 
+# 2 teams in a game
 footy_match_play$joinColumn <- 1
 
+# To work out a percentage between the 2 teams,
+# processing duplicates each row by essentially doing
+# a cross-join to the duplicate table.
+# Then column_pcnt = column / sum(column)
+# Processing will then filter out the duplicate and
+# be left with the percentages.
 joinColumn <- c(1, 1)
 UsTeam <- c(1, 2)
 duplicate <- data.frame(joinColumn, UsTeam)
 
 pcnt_fun <- function(x, na.rm = TRUE) (x / sum(x, na.rm) )
 
-
+# Reduce game date to just the date portion
 footy_match_play$gameDate = substr(footy_match_play$gameDate, 1, 10)
 
-footy_match_game1 <- footy_match_play %>%
+# Steps to create percentages:
+# 1. Summarise plays up to 1 row per team per game
+# 2. Create columns such as velocity and ppm
+# 3. Do cross-join to duplicate rows
+# 4. Do windowing to work out percentage over the 2 teams in a game
+# 5. Remove duplicate rows
+footy_match <- footy_match_play %>%
 #  filter(gameID == "-LE6m4eLGNTqcr9JmgTQ") %>%
    group_by(competition, gameID, teamName, playByUs, joinColumn, orderCol, matchName, gameDate,
            ourName, theirName) %>%
@@ -64,6 +65,7 @@ footy_match_game1 <- footy_match_play %>%
   left_join(duplicate, c("joinColumn" = "joinColumn")) %>%
   ungroup () %>%
   group_by(competition, gameID, UsTeam) %>%
+  # Work out who won the game based on number of goals each side scored
   mutate(result = case_when(sum(goals) == 0 ~ "Draw",
                             goals/sum(goals) == 0.5 ~ "Draw",
                             goals/sum(goals) < 0.5 ~ "Loss", 
@@ -124,7 +126,7 @@ footy_match_game1 <- footy_match_play %>%
   filter(UsTeam == 1)
   
 # Remove game with strange stats.. 
-footy_match_game1 <- footy_match_game1[!footy_match_game1$competition == "2017 Mens Open", ]
+footy_match <- footy_match[!footy_match_game1$competition == "2017 Mens Open", ]
 
 library(corrplot)
 abc<- footy_match_game1[, c(64:115)]
@@ -191,13 +193,9 @@ train.index = !footy_match_game1$competition %in% c("2019 NSFA 1 Girls Under 16"
 
 n = nrow(xgb.data)
 train.index = sample(n,floor(0.75*n))
-train.data = as.matrix(xgb.data[!footy_match_game1$competition %in% c("2019 NSFA 1 Girls Under 16", 
-                                                                       "2019 NSFA 1 Boys Under 13", 
-                                                                       "2019 World Cup 2019 Mens Open",             
-                                                                       "2019 International Friendly Mens Open"   ,  
-                                                                       "2019 Boys Under 14"                ,        
-                                                                       "2019 Icc Football Mens Open"
-), ])
+train.data = as.matrix(fty_train_data[-1])
+label = as.integer(footy_data$default)-1
+train.label = label[index]
 train.label = label[!footy_match_game1$competition %in% c("2019 NSFA 1 Girls Under 16", 
                                                           "2019 NSFA 1 Boys Under 13", 
                                                           "2019 World Cup 2019 Mens Open",             
@@ -220,7 +218,7 @@ test.label = label[footy_match_game1$competition %in% c("2019 NSFA 1 Girls Under
                                                          "2019 Icc Football Mens Open"
 )]
 
-str(xgb.train)
+str(train.label)
 # Transform the two data sets into xgb.Matrix
 xgb.train = xgb.DMatrix(data=train.data,label=train.label)
 xgb.test = xgb.DMatrix(data=test.data,label=test.label)
@@ -246,13 +244,17 @@ xgb.fit=xgb.train(
   nrounds=10000,
   nthreads=1,
   early_stopping_rounds=10,
-  watchlist=list(val1=xgb.train,val2=xgb.test),
+  watchlist=list(val1=xgb.train),
   verbose=0
 )
 
 # Review the final model and results
 xgb.fit
+model <- xgb.dump(xgb.fit, with_stats = T)
+model[1:10]
 summary(xgb.fit)
+importance_matrix <- xgb.importance(names, model = xgb.fit)
+xgb.plot.importance(importance_matrix[1:10,])
 
 
 # Predict outcomes with the test data

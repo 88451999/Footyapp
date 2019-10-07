@@ -13,37 +13,66 @@ library(tidyverse)
 library(readr)
 library(dplyr)
 library(ggplot2)
-library(zoo)
 library(shiny)
 library(scales)
 library(DT)
-
-library(sp)
-library(rgdal)
-library(ggmap)
-library(tmap)
-library(adehabitatHR)
-library(raster)
 library(spatstat)
-library(spatialkernel)
+library(ggmap)
 library(lubridate)      
-library(ggsoccer)
+library(ggsoccer)      
+library(ggrepel)  
+library(cluster)  
+library(factoextra)
 
 
-setwd("/GitDev/Footyapp/data/") # use here function instead
+#setwd("/GitDev/Footyapp/data/") # use here function instead
 
 FootyGames <- read.csv("FootyGames113.csv", stringsAsFactors = FALSE)
 footy_match_play <- read.csv("FootyMatchPlay13.csv", stringsAsFactors = FALSE)
 footy_match_age <- read.csv("FootyMatchAgeFull.csv", stringsAsFactors = FALSE)
+footy_team_cluster <- read.csv("FootyTeamCluster.csv", stringsAsFactors = FALSE)
+
+# Select the columns to include for clustering
+# These are columns that to some extent the team can
+# control themselves
+cols = c('ppm', 'aveVelocity', 
+         'isZone17Incursion_pcnt', 'isZone14Incursion_pcnt', 'isZone11PassIncursion_pcnt',
+         'totalBackPasses_pcnt', 'totalFwdPasses_pcnt', 'totalSidePasses_pcnt',
+         'total10mPasses_pcnt', 'total10_20mPasses_pcnt', 'total20mPasses_pcnt',
+         'crossfieldPlay_pcnt', 'backPassTurnover_pcnt',
+         'fwdPassTurnover_pcnt', 'sidePassTurnover_pcnt',
+         'AMPlay_pcnt', 'MDPlay_pcnt', # Going backwards in zones
+         'backKeeperPasses_pcnt', 'clearances_pcnt',
+         'passZero_pcnt', 'passPlay_pcnt', 'pass1_pcnt',
+         'pass2_3_pcnt', 'pass4_6_pcnt', 'pass7Plus_pcnt')
+
+# Take subset of columns for cluster analysis
+ftc_cluster <- footy_team_cluster[, c("competition", "teamName", "playByUs", "age_group", cols)]#  %>% filter(competition == "2019 NSFA 1 Boys Under 13")
+
+# Rename columns for displaying
+colnames(ftc_cluster) <- c('competition', 'teamName', 'playByUs',
+                           'age_group',
+                           'Passes Per Minute', 'Velocity', 
+                           'Zone 17 Incursions', 'Zone 14 Incursions', 'Passes into Zone 11',
+                           'Back Pass', 'Forward Pass', 'Side Pass',
+                           '10m Passes', '10-20m Passes', '20m+ Passes',
+                           'Crossfield Play across Back', 'Back Pass from Turnover',
+                           'Forward Pass from Turnover', 'Side Pass from Turnover',
+                           'Attack to Midfield', 'Midfield to Defence',
+                           'Passes to Keeper', 'Clearances',
+                           'Plays with No Passes', 'Plays with Passes', 'Plays with 1 Pass',
+                           'Plays with 2-3 Passes', 'Plays with 4-6 Passes', 'Plays with 7+ Passes')
+
+top_flight_comps <- c("2019 World Cup 2019 Mens Open",             
+                      "2019 International Friendly Mens Open",        
+                      "2019 Icc Football Mens Open",
+                      "2019 Mens Open")
+our_comp <- "2019 NSFA 1 Boys Under 13"
 
 FootyGames$orderDate <- ymd(substr(FootyGames$time, 1, 10))
-#write.csv(FootyGames, "FootyGamesUs2.csv", row.names = FALSE)
 
-#footy_match_play$teamName = ifelse(footy_match_play$playByUs == "true", footy_match_play$ourName, footy_match_play$theirName)
-
-#FootyGames$widthMetres = 75 - FootyGames$widthMetres 
-#FootyGames$widthFraction = 1 - FootyGames$widthFraction 
-
+# For heat maps, our team runs left to right,
+# Opposition runs right to left
 FootyGames$lengthMetres = ifelse(FootyGames$playByUs == "false", 110 - FootyGames$lengthMetres, FootyGames$lengthMetres)
 FootyGames$widthMetres = ifelse(FootyGames$playByUs == "false", 75 - FootyGames$widthMetres, FootyGames$widthMetres)
 FootyGames$lengthFraction = ifelse(FootyGames$playByUs == "false", 1 - FootyGames$lengthFraction, FootyGames$lengthFraction)
@@ -81,6 +110,12 @@ listGraphs[["AttackSides"]] <- list(columns=c("leftAttack", "rightAttack", "midd
                                     title="Channel into Attacking Third",
                                     ylab="Attack Channel",
                                     type="both")
+listGraphs[["PassSequence"]] <- list(columns=c("passZero", "pass1", "pass2_3", "pass4_6", "pass7Plus"),
+                                     levels=c("pass7Plus", "pass4_6", "pass2_3", "pass1", "passZero"),
+                                     labels=c("7+", "4 - 6", "2 - 3", "1", "0"),
+                                     title="Number of Passes per Play",
+                                     ylab="Possession",
+                                     type="Both")
 listGraphs[["TurnoverDirection"]] <- list(columns=c("backPassTurnover", "sidePassTurnover", "fwdPassTurnover"),
                                           levels=c("sidePassTurnover", "backPassTurnover", "fwdPassTurnover"),
                                           labels=c("Side", "Back", "Forward"),
@@ -147,48 +182,6 @@ listGraphs[["RegionMoves"]] <- list(columns=c("MAPlay", "AMPlay", "MDPlay", "DMP
                                    title="Switch Between Regions",
                                    ylab="Plays",
                                    type="Both")
-listGraphs[["PassSequence"]] <- list(columns=c("passZero", "pass1", "pass2_3", "pass4_6", "pass7Plus"),
-                                    levels=c("pass7Plus", "pass4_6", "pass2_3", "pass1", "passZero"),
-                                    labels=c("7+", "4 - 6", "2 - 3", "1", "0"),
-                                    title="Number of Passes per Play",
-                                    ylab="Possession",
-                                    type="Both")
-listGraphs[["ppmAttack"]] <- list(columns=c("ppmAttack"),
-                            levels=c("ppmAttack"),
-                            labels=c("Passes Per Minute"),
-                            title="Passes Per Minute in Attack Zone",
-                            ylab="Passes",
-                            type="count")
-listGraphs[["ppmMidfield"]] <- list(columns=c("ppmMidfield"),
-                                  levels=c("ppmMidfield"),
-                                  labels=c("Passes Per Minute"),
-                                  title="Passes Per Minute in Midfield Zone",
-                                  ylab="Passes",
-                                  type="count")
-listGraphs[["ppmDefence"]] <- list(columns=c("ppmDefence"),
-                                  levels=c("ppmDefence"),
-                                  labels=c("Passes Per Minute"),
-                                  title="Passes Per Minute in Defence Zone",
-                                  ylab="Passes",
-                                  type="count")
-listGraphs[["attackVelocity"]] <- list(columns=c("attackVelocity"),
-                                 levels=c("attackVelocity"),
-                                 labels=c("Velocity"),
-                                 title="Velocity of Ball in Attack Zone",
-                                 ylab="Velocity",
-                                 type="count")
-listGraphs[["midfieldVelocity"]] <- list(columns=c("midfieldVelocity"),
-                                       levels=c("midfieldVelocity"),
-                                       labels=c("Velocity"),
-                                       title="Velocity of Ball in Midfield Zone",
-                                       ylab="Velocity",
-                                       type="count")
-listGraphs[["defenceVelocity"]] <- list(columns=c("defenceVelocity"),
-                                         levels=c("defenceVelocity"),
-                                         labels=c("Velocity"),
-                                         title="Velocity of Ball in Defence Zone",
-                                         ylab="Velocity",
-                                         type="count")
 listGraphs[["goalRegion"]] <- list(columns=c("goalAttack", "goalMidfield", "goalDefence"),
                                         levels=c("goalAttack", "goalMidfield", "goalDefence"),
                                         labels=c("Attack", "Midfield", "Defence"),
@@ -205,7 +198,7 @@ listGraphs[["goalTransition"]] <- list(columns=c("goalTurnover", "goalRestart"),
 stat_value = "stack"
 
 
-comp <- "2019 NSFA 1 Boys Under 13"
+comp <- "2019 NSFA 1 Girls Under 16"
 team <- "NFC Red"
 
 footy_match_play$orderCol <- case_when(footy_match_play$competition == comp & footy_match_play$teamName == team ~ 0,
@@ -226,7 +219,8 @@ ui <- dashboardPage(
             menuItem("Playmap", tabName = "playmap", icon = icon("th")),
             menuItem("Team Statistics", tabName = "teamstats", icon = icon("th")),
             menuItem("Age Group Statistics", tabName = "agestats", icon = icon("th")),
-            menuItem("Game Statistics", tabName = "gamestats", icon = icon("th"))
+            menuItem("Game Statistics", tabName = "gamestats", icon = icon("th")),
+            menuItem("Team Clusters", tabName = "cluster", icon = icon("th"))
         )
     ),
     
@@ -381,24 +375,18 @@ ui <- dashboardPage(
                   selectInput("tsAttribute",
                               "Statistic:",
                               choices = c("Turnover Direction" = "TurnoverDirection",
+                                          "Passing Sequences" = "PassSequence", 
                                           "Attack Channel" = "AttackSides", 
                                           "Pass Direction" = "PassDirection", 
                                           "Pass Length" = "PassLength",
                                           "Region Duration" = "RegionDuration",
                                           "Region Distance" = "RegionDistance", 
-                                          "Region Passes" = "RegionPass", 
-                                          "Crossfield Plays" = "CrossfieldPlay", 
+                                          "Region Passes" = "RegionPass",  
                                           "Passes Per Minute" = "ppm", 
                                           "Play Speed" = "velocity",
+                                          "Crossfield Plays" = "CrossfieldPlay",
                                           "Back to Keeper" = "backKeeper",
                                           "Region Moves" = "RegionMoves",
-                                          "Passing Sequences" = "PassSequence", 
-                                          "Passes Per Minute (Attack)" = "ppmAttack", 
-                                          "Passes Per Minute (Midfield)" = "ppmMidfield",
-                                          "Passes Per Minute (Defence)" = "ppmDefence", 
-                                          "Play Speed (Attack)" = "attackVelocity",
-                                          "Play Speed (Midfield)" = "midfieldVelocity", 
-                                          "Play Speed (Defence)" = "defenceVelocity", 
                                           "Goals (Starting Region)" = "goalRegion", 
                                           "Goals (Starting Event)" = "goalTransition"),
                               selected = "TurnoverDirection" ),
@@ -428,13 +416,14 @@ ui <- dashboardPage(
               )
             ) # fluidpage tabitem 3
     ), # tab item 3
+    
     # Third tab content
     tabItem(tabName = "agestats",
             fluidPage(
               
               
               # Application title
-              titlePanel("Football Statistics Northbridge Under 13"),
+              titlePanel("Age Statistics"),
               
               # Sidebar with a slider input for number of bins 
               sidebarLayout(
@@ -442,24 +431,18 @@ ui <- dashboardPage(
                   selectInput("asAttribute",
                               "Statistic:",
                               choices = c("Turnover Direction" = "TurnoverDirection",
+                                          "Passing Sequences" = "PassSequence", 
                                           "Attack Channel" = "AttackSides", 
                                           "Pass Direction" = "PassDirection", 
                                           "Pass Length" = "PassLength",
                                           "Region Duration" = "RegionDuration",
                                           "Region Distance" = "RegionDistance", 
-                                          "Region Passes" = "RegionPass", 
-                                          "Crossfield Plays" = "CrossfieldPlay", 
+                                          "Region Passes" = "RegionPass",  
                                           "Passes Per Minute" = "ppm", 
                                           "Play Speed" = "velocity",
                                           "Back to Keeper" = "backKeeper",
+                                          "Crossfield Plays" = "CrossfieldPlay",
                                           "Region Moves" = "RegionMoves",
-                                          "Passing Sequences" = "PassSequence", 
-                                          "Passes Per Minute (Attack)" = "ppmAttack", 
-                                          "Passes Per Minute (Midfield)" = "ppmMidfield",
-                                          "Passes Per Minute (Defence)" = "ppmDefence", 
-                                          "Play Speed (Attack)" = "attackVelocity",
-                                          "Play Speed (Midfield)" = "midfieldVelocity", 
-                                          "Play Speed (Defence)" = "defenceVelocity", 
                                           "Goals (Starting Region)" = "goalRegion", 
                                           "Goals (Starting Event)" = "goalTransition"),
                               selected = "TurnoverDirection" ),
@@ -514,7 +497,30 @@ ui <- dashboardPage(
 hr(),
               plotOutput("gamePlot")#,
             ) # fluidpage tabitem 4
-    ) # tab item 4
+    ), # tab item 4
+
+    # Second tab content
+    tabItem(tabName = "cluster",
+        fluidPage(
+          tabsetPanel(
+            tabPanel("PCA", plotOutput("PCAPlot")),
+            tabPanel("Hierarchy", plotOutput("HierPlot"))
+          )
+          ,
+          hr(),
+          fluidRow(
+            checkboxInput("cpTopFlight", "Include Top-Flight Teams",
+                          value = TRUE),
+            radioButtons("cpDisplay", "Display Options:",
+                         c("Show Teams and Variables" = "none",
+                           "Teams Only" = "var",
+                           "Variables Only" = "ind"),
+                         selected = "none")
+          )
+        ) # fluidpage tabitem 2
+
+    ) # tab item 5
+
   ) # tabitems
     
 ) # dashboardBody
@@ -830,7 +836,8 @@ server <- function(input, output) {
           scale_fill_discrete(name="") +
           theme(axis.text.x = element_text(angle = 45, hjust = 1,
                                            color=myPalette[unlist(HomeWins[order(HomeWins$gameDate), 3])]),
-                plot.title = element_text(hjust=0.5)) + 
+                plot.title = element_text(hjust=0.5),
+                legend.position = "none") + 
           labs(x = "Team", y = listGraphs[[input$tsAttribute]]$ylab, 
                title = listGraphs[[input$tsAttribute]]$title,
                legend = "") +
@@ -938,7 +945,7 @@ server <- function(input, output) {
          scale_fill_discrete(name="") +
          theme(axis.text.x = element_text(angle = 45, hjust = 1),
                plot.title = element_text(hjust=0.5)) + 
-         labs(x = "Team", y = listGraphs[[input$asAttribute]]$ylab, 
+         labs(x = "Age Group", y = listGraphs[[input$asAttribute]]$ylab, 
               title = listGraphs[[input$asAttribute]]$title,
               legend = "") +
          facet_grid(rows = vars(factor(playByUs,
@@ -958,8 +965,9 @@ server <- function(input, output) {
          geom_bar(position = "stack", stat = "identity") +
          scale_fill_discrete(name="") +
          theme(axis.text.x = element_text(angle = 45, hjust = 1),
-               plot.title = element_text(hjust=0.5)) + 
-         labs(x = "Team", y = listGraphs[[input$asAttribute]]$ylab, 
+               plot.title = element_text(hjust=0.5),
+               legend.position = "none") + 
+         labs(x = "Age Group", y = listGraphs[[input$asAttribute]]$ylab, 
               title = listGraphs[[input$asAttribute]]$title,
               legend = "") +
          facet_grid(rows = vars(factor(playByUs,
@@ -971,6 +979,100 @@ server <- function(input, output) {
        
        
      }
+   })
+   
+   my_cluster <- reactive({
+     
+     # Filter on competitions to cluster
+     if (input$cpTopFlight) {
+     ftc_data <- ftc_cluster %>%   
+       filter(competition %in% c(top_flight_comps, our_comp))
+     } else {
+       ftc_data <- ftc_cluster %>%   
+         filter(competition %in% c(our_comp))
+     }       
+     print(top_flight_comps)
+     ftc_data
+   })
+   
+   output$PCAPlot <- renderPlot({
+     
+     ftpca.pr <- prcomp(my_cluster()[, -c(1:4)], center = TRUE, scale = TRUE)
+     
+     # Get the variable contributions that make up PCA
+     res.var <- get_pca_var(ftpca.pr)
+     
+     # Take 1st 2 dimensions
+     pca_vars <- data.frame(pca_1 = res.var$coord[, 1], 
+                            pca_2 = res.var$coord[, 2],
+                            variable = rownames(res.var$coord)
+     )
+     
+     # Work out distance and those furthest away will be shown 
+     pca_vars$distance <- pca_vars$pca_1 ^ 2 + pca_vars$pca_2 ^ 2
+     pca_vars <- pca_vars %>% ungroup() %>%
+       arrange(-distance) %>%
+       mutate(ranking = row_number())
+     top20 = pca_vars[pca_vars$ranking <= 20, ]$variable 
+     print(nrow(my_cluster()))
+     # Plot the 2-d PCA Plot plus important features
+     p = fviz_pca_biplot(ftpca.pr, geom = c("point", "text"),
+                     geom.var = c("text"),
+                     geom.ind = c("point"),
+                     select.var = list(name=top20),
+                     col.var="steel blue",
+                     pointshape = 21, 
+                     pointsize = 4.5, 
+                     invisible=input$cpDisplay,
+                     title = our_comp,
+                     fill.ind = ifelse(my_cluster()$competition==our_comp, 
+                                       paste(ifelse(my_cluster()$playByUs == "true", "Us", "Opposition")),
+                                       "Top-Flight Teams"), 
+                     alpha.var = 0.1, 
+                     repel = TRUE,
+                     mean.point = FALSE)+
+       theme_minimal()+
+       labs(fill = "Team")
+       
+       if (input$cpDisplay == "ind") {
+         p
+       } else {
+         p + 
+         geom_text_repel(aes(label=my_cluster()$teamName), 
+                       box.padding = 0.1, point.padding =0.1, 
+                       segment.color = 'grey50', seed = 13,
+                       size=3.5) 
+       }
+     
+   })
+   
+   output$HierPlot <- renderPlot({
+     
+     m<-as.matrix(my_cluster()[ -c(1:4)])
+     rownames(m) <- my_cluster()$teamName
+     # Scale all columns so each feature has equal importance in distance
+     m <- scale(m)
+     
+     # Create Cosine Distance Function
+     cosineSim <- function(x){
+       as.dist(x%*%t(x)/(sqrt(rowSums(x^2) %*% t(rowSums(x^2)))))
+     }
+     # Compute cosine distance of each team
+     cs <- cosineSim(m)
+     cd <- 1-cs
+
+     # For Agglomerative Hierarchical Clustering,
+     # create groups to display
+     groups <- hclust(cd,method="ward.D")
+     # Visualize hierarchical clustering
+     # Again 3 groups
+     fviz_dend(groups, k = 3, 
+               cex = 0.8, 
+               main = "2019 NSFA 1 Girls Under 16",
+               labels_track_height=3,
+               horiz= TRUE, rect = TRUE # Add rectangle around groups
+              )
+     
    })
    
     
