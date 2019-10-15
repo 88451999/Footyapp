@@ -217,7 +217,7 @@ ui <- dashboardPage(
             menuItem("Play map", tabName = "playmap"),
             menuItem("Team Statistics", tabName = "teamstats"),
             menuItem("Age Group Statistics", tabName = "agestats"),
-            menuItem("Game Statistics", tabName = "gamestats"),
+            menuItem("Game Possession", tabName = "gamestats"),
             menuItem("Team Clusters", tabName = "cluster")
         )
     ),
@@ -314,20 +314,15 @@ ui <- dashboardPage(
       ) # fluidpage tabitem 2
     ), # tab item 2 (Heat maps)
   
-    # Third tab content - Playmap - #### TBD ####
+    # Third tab content - Playmap 
     tabItem(tabName = "playmap",
             fluidPage(
-              tabsetPanel(
-                tabPanel("Play", plotOutput("playPlot"),
-                         plotOutput("playPlot1"))
-              )
-              ,
-              hr(),
               fluidRow(
-                sliderInput("pmGameTime", "Time:",
-                            min = 0, max = 100, value = c(0, 100)
+                column(6, sliderInput("pmGameTime", "Time (%):",
+                                     min = 0, max = 100, value = c(0, 100)
+                )
                 ),
-                selectInput("pmFirstEvent",
+                column(6, selectInput("pmFirstEvent",
                             "Phase Play:",
                             choices = c("All" = "all",
                                         "Turnover" = "first touch",
@@ -337,22 +332,22 @@ ui <- dashboardPage(
                                         "Kick Off" = "kick off",    
                                         "Keeper Punt" = "keeper punt",
                                         "Foul Restart" = "foul"),
-                            selected = "all" ),
-                selectInput("pmOpponent",
-                            "Opponent:",
-                            choices = c("All", unique(FootyGames$theirName)),
-                            selected = "All" ),
-                selectInput("pmResult",
-                            "Play Result:",
-                            choices = c("All" = "all",
-                                        "Attacking 3rd" = "AttackIncursion",
-                                        "Goal" = "goal"),
-                            selected = "all" ),
-                selectInput("pmMatch",
-                            "Match:",
-                            choices = c(rev(unique(FootyGames$matchName)))
+                            selected = "all" )
                 )
+                ),
+              fluidRow(column(6, selectInput("pmMatch",
+                          "Match:",
+                          choices = c(rev(unique(FootyGames$matchName)))
               )
+              ),
+              column(6, selectInput("pmResult",
+                                 "Play Result:",
+                                 choices = c("All" = "all",
+                                             "Attacking 3rd" = "AttackIncursion",
+                                             "Goal" = "goal"),
+                                 selected = "all" )
+              )),
+              fluidRow(plotOutput("playPlot"))
             ) # fluidpage tabitem 2
     ), # tab item 2
     
@@ -441,7 +436,7 @@ ui <- dashboardPage(
             ) # fluidpage tabitem 5 - Age
     ), # tab item 5
     
-    # Sixth tab content
+    # Sixth tab content - Game Possession
     tabItem(tabName = "gamestats",
             fluidPage(
               fluidRow(
@@ -486,9 +481,9 @@ ui <- dashboardPage(
             tabPanel("PCA", plotOutput("PCAPlot")),
             tabPanel("Hierarchy", plotOutput("HierPlot"))
           )
-        ) # fluidpage tabitem 2
+        ) # fluidpage end
 
-    ) # tab item 5
+    ) # tab item 7
 
   ) # tabitems
     
@@ -497,8 +492,13 @@ ui <- dashboardPage(
 
 
 # Define server logic required to draw a histogram
-server <- function(input, output) {
-
+server <- function(input, output, session) {
+  observe({
+    query <- parseQueryString(session$clientData$url_search)
+  })
+  
+  # Dashboard 1 - Passing Breakdown
+  # -------------------------------
   output$passPlot <- renderPlot({
     
     data <- footy_match_play
@@ -535,221 +535,159 @@ server <- function(input, output) {
                                     labels = c("Us", "Opponents"))) )
     
   })
-  
-    output$BallPlot <- renderPlot({
-        ggplot(footy_match_play %>% 
-            ungroup %>% group_by(teamName, orderCol) %>%
-            summarise(ppm = sum(totalPasses)/ (sum(possessionDuration/60))) ,
-        aes(x=reorder(teamName, orderCol, FUN=max), y= ppm, fill=teamName) ) +
-        geom_bar( stat = "identity", position = "dodge") +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1),
-              legend.position = "none",
-              plot.title = element_text(hjust=0.5)) + 
-        labs(x = "Team", y = "Passes", 
-             title = "Passes Per Minute")
-    })
-    
-    
-    my_heat <- reactive({
-      print(input$hmResult)
-      print(nrow(FootyGames))
-      data <- FootyGames
-      if (input$hmFirstEvent != "all") {
-        if (input$hmFirstEvent == "foul") {
-          eventsList <- c("offside restart", "direct restart", "indirect restart")
-        } else {
-          eventsList <- input$hmFirstEvent
-        }
-        data <- data %>% filter(firstEvent %in% eventsList)
+
+  # Dashboard 2 - Heat Map
+  # ----------------------
+  # First create reactive variable that is then used
+  # in each heat map plot
+  my_heat <- reactive({
+      
+    data <- FootyGames
+    if (input$hmFirstEvent != "all") {
+      if (input$hmFirstEvent == "foul") {
+        eventsList <- c("offside restart", "direct restart", "indirect restart")
+      } else {
+        eventsList <- input$hmFirstEvent
       }
-      if (!input$hmPasses) {
-        data <- data %>% filter(numberPasses > 0)
+      data <- data %>% filter(firstEvent %in% eventsList)
+    }
+    if (!input$hmPasses) {
+      data <- data %>% filter(numberPasses > 0)
+    }
+    
+    if (input$hmResult != "All") {
+      if (input$hmResult == "goal") {
+        data <- data %>% filter(isGoal == 1) 
+      } else if (input$hmResult == "AttackIncursion") {
+      data <- data %>% filter(isAttackIncursion == 1)
       }
-      print(nrow(data))
-      if (input$hmResult != "All") {
-        if (input$hmResult == "goal") {
-          data <- data %>% filter(isGoal == 1) 
-        } else if (input$hmResult == "AttackIncursion") {
+    }
+      
+    if (input$hmJustFirst) {
+      data <- data %>% filter(sequenceNumber == 1)
+    }
+    if (input$hmOpponent != "All") {
+      data <- data %>% filter(theirName == input$hmOpponent)
+    }
+    if (input$hmMatch != "All") {
+      data <- data %>% filter(matchName == input$hmMatch)
+    }
+
+    data
+  })
+    
+  # Heat map for Our Team
+  # my_heat reactive variable takes care of the filtering
+  output$heatPlot <- renderPlot({
+      
+    # Final filter on Our Team
+    data <- my_heat() %>% filter(playByUs == "true")
+    pppxy <- ppp(data$lengthMetres, data$widthMetres,
+                 c(0,110), c(0,75), checkdup=FALSE)
+    plot(density(pppxy, diggle=TRUE), multiplot=FALSE,
+         main = "Opposition (running L to R)")
+    
+  })
+
+  # Heat map for Opposition Team
+  output$heatPlota <- renderPlot({
+      
+    # Filter on Opposition team
+    data <- my_heat() %>% filter(playByUs == "false")
+    pppxy <- ppp(data$lengthMetres, data$widthMetres,
+                 c(0,110), c(0,75), checkdup=FALSE)
+    plot(density(pppxy, diggle=TRUE), multiplot=FALSE,
+         main = "Opposition (running R to L)")
+    
+  })
+    
+  # Dashboard 3 - Play Map
+  # ----------------------
+  # Create reactive variable first to do filtering
+  my_play <- reactive({
+      
+    data <- FootyGames
+    if (input$pmFirstEvent != "all") {
+      if (input$pmFirstEvent == "foul") {
+        eventsList <- c("offside restart", "direct restart", "indirect restart")
+      } else {
+        eventsList <- input$pmFirstEvent
+      }
+      data <- data %>% filter(firstEvent %in% eventsList)
+    }
+    if (input$pmResult != "All") {
+      if (input$pmResult == "goal") {
+        data <- data %>% filter(isGoal == 1) 
+      } else if (input$pmResult == "AttackIncursion") {
         data <- data %>% filter(isAttackIncursion == 1)
-        }
       }
-      print(nrow(data))
-      if (input$hmJustFirst) {
-        data <- data %>% filter(sequenceNumber == 1)
-      }
-      print(nrow(data))
-      if (input$hmOpponent != "All") {
-        data <- data %>% filter(theirName == input$hmOpponent)
-      }
-      if (input$hmMatch != "All") {
-        data <- data %>% filter(matchName == input$hmMatch)
-      }
+    }
+    data <- data %>% filter(matchName == input$pmMatch)
+    start_time = min(data$epochTime)
+    end_time = max(data$epochTime)
+      
+    data <- data %>% filter(epochTime >= start_time + (end_time - start_time) * input$pmGameTime[1]/100 &
+                            epochTime <= start_time + (end_time - start_time) * input$pmGameTime[2]/100)
+      
+    data
+  })
+  
+  # Then display the plot  
+  output$playPlot <- renderPlot({
 
-      data
-    })
-    
-    # Heat map for Our Team
-    # my_heat reactive variable takes care of the filtering
-    output$heatPlot <- renderPlot({
-      
-      # Final filter on Our Team
-      data <- my_heat() %>% filter(playByUs == "true")
-      pppxy <- ppp(data$lengthMetres, data$widthMetres,
-                   c(0,110), c(0,75), checkdup=FALSE)
-      plot(density(pppxy, diggle=TRUE), multiplot=FALSE,
-           main = "Opposition (running L to R)")
-      
-    })
-
-    # Heat map for Our Team
-    # my_heat reactive variable takes care of the filtering
-    output$heatPlota <- renderPlot({
-      
-      # Filter on Opposition team
-      data <- my_heat() %>% filter(playByUs == "false")
-      pppxy <- ppp(data$lengthMetres, data$widthMetres,
-                   c(0,110), c(0,75), checkdup=FALSE)
-      plot(density(pppxy, diggle=TRUE), multiplot=FALSE,
-           main = "Opposition (running R to L)")
-      
-    })
-    
-    output$scatPlot <- renderPlot({
-
-      ggplot(my_heat() %>% group_by(gameID, playNumber) %>%
-               arrange(gameID, playNumber, sequenceNumber) %>%
-               mutate(x1 = lead(lengthMetres),
-                      y1 = lead(widthMetres)) %>%
-               ungroup(), #%>%
-              # filter(sequenceNumber != maxSequenceNumber), 
-             aes(x = lengthMetres, y = widthMetres, 
+    our_goals = sum(FootyGames[FootyGames$matchName == input$pmMatch & FootyGames$playByUs == "true" &
+                                 FootyGames$adjEventName == "goal", ]$isGoal)
+    their_goals = sum(FootyGames[FootyGames$matchName == input$pmMatch & FootyGames$playByUs == "false" &
+                                   FootyGames$adjEventName == "goal", ]$isGoal)
+    data <- my_play() 
+    ggplot(data %>% group_by(gameID, playNumber) %>%
+           arrange(gameID, playNumber, sequenceNumber) %>%
+           mutate(x1 = lead(lengthMetres),
+                  y1 = lead(widthMetres)) %>%
+           ungroup(),
+           aes(x = lengthMetres, y = widthMetres, 
                  xend = x1, yend = y1)) +
-        annotate_pitch(dimensions = stats_field, fill = "light green") +
-        geom_segment(data = . %>% filter(sequenceNumber != maxSequenceNumber)) +
-        geom_point(aes(color=factor(ifelse(sequenceNumber == maxSequenceNumber &
-                                             byUs != playByUs, 1, 0)))) +
-        theme_pitch() +
-        theme(legend.position = "none")
-        
+           annotate_pitch(dimensions = stats_field, fill = "light green") +
+           geom_segment(data = . %>% filter(sequenceNumber != maxSequenceNumber),
+                        mapping = aes(color = playByUs),
+                        arrow = arrow(length = unit(0.2, "cm"),
+                                      type = "open")) +
+           geom_point(color="grey50") + 
+           theme_pitch() +
+           scale_color_manual(values = c("true" = "red", "false" = "blue")) +
+           theme(legend.position = "none",
+                 plot.title = element_text(hjust = 0.5, face = "bold")) +
+           labs(title=paste("Result:", our_goals, '-', their_goals ))
       
-    })
+  })
 
-    my_play <- reactive({
-      print(nrow(FootyGames))
-      data <- FootyGames
-      if (input$pmFirstEvent != "all") {
-        if (input$pmFirstEvent == "foul") {
-          eventsList <- c("offside restart", "direct restart", "indirect restart")
-        } else {
-          eventsList <- input$pmFirstEvent
-        }
-        data <- data %>% filter(firstEvent %in% eventsList)
-      }
-      if (input$pmResult != "All") {
-        if (input$pmResult == "goal") {
-          data <- data %>% filter(isGoal == 1) 
-        } else if (input$pmResult == "AttackIncursion") {
-          data <- data %>% filter(isAttackIncursion == 1)
-        }
-      }
-      data <- data %>% filter(matchName == input$pmMatch)
-      print(nrow(data))
-      start_time = min(data$epochTime)
-      end_time = max(data$epochTime)
+  # Dashboard 4 - Team Statistics
+  # -----------------------------
+  # Team Stats filtering as reactive variable
+  my_team <- reactive({
+    data <- footy_match_play %>%
+       mutate(goalAttack = ifelse(isGoal == 1 & Area == "Attack", 1, 0),
+              goalMidfield = ifelse(isGoal == 1 & Area == "Midfield", 1, 0),
+              goalDefence = ifelse(isGoal == 1 & Area == "Defence", 1, 0),
+              goalTurnover = ifelse(isGoal == 1 & firstEvent == "first touch", 1, 0),
+              goalRestart = ifelse(isGoal == 1 & firstEvent != "first touch", 1, 0)
+             )
       
-      data <- data %>% filter(epochTime >= start_time + (end_time - start_time) * input$pmGameTime[1]/100 &
-                                epochTime <= start_time + (end_time - start_time) * input$pmGameTime[2]/100)
-      
-      print(nrow(data))
-      data
-    })
-    
-    
-    output$playPlot <- renderPlot({
-      
-      #  ggplot(my_heat(),
-      #         aes(x=lengthMetres, y= widthMetres) ) +
-      #    geom_point() +
-      #  coord_fixed(xlim=c(0, 110), ylim=c(0, 75))
-      
-      data <- my_play() %>% filter(playByUs == "true")
-      ggplot(data %>% group_by(gameID, playNumber) %>%
-               arrange(gameID, playNumber, sequenceNumber) %>%
-               mutate(x1 = lead(lengthMetres),
-                      y1 = lead(widthMetres)) %>%
-               ungroup(), #%>%
-             # filter(sequenceNumber != maxSequenceNumber), 
-             aes(x = lengthMetres, y = widthMetres, 
-                 xend = x1, yend = y1)) +
-        annotate_pitch(dimensions = stats_field, fill = "light green") +
-        geom_segment(data = . %>% filter(sequenceNumber != maxSequenceNumber)) +
-        geom_point(aes(color=factor(ifelse(sequenceNumber == maxSequenceNumber &
-                                             byUs != playByUs, 1, 0)))) +
-        theme_pitch() +
-        theme(legend.position = "none")
-      
-      
-    })
-    
-    output$playPlot1 <- renderPlot({
-      
-      #  ggplot(my_heat(),
-      #         aes(x=lengthMetres, y= widthMetres) ) +
-      #    geom_point() +
-      #  coord_fixed(xlim=c(0, 110), ylim=c(0, 75))
-      
-      data <- my_play() #%>% filter(playByUs == "false")
-      ggplot(data %>% group_by(gameID, playNumber) %>%
-               arrange(gameID, playNumber, sequenceNumber) %>%
-               mutate(x1 = lead(lengthMetres),
-                      y1 = lead(widthMetres)) %>%
-               ungroup(), #%>%
-             # filter(sequenceNumber != maxSequenceNumber), 
-             aes(x = lengthMetres, y = widthMetres, 
-                 xend = x1, yend = y1)) +
-        annotate_pitch(dimensions = stats_field, fill = "light green") +
-        geom_segment(data = . %>% filter(sequenceNumber != maxSequenceNumber),
-                     mapping = aes(color = playByUs)) +
-        geom_point(aes(color=factor(ifelse(sequenceNumber == maxSequenceNumber &
-                                             byUs != playByUs, 1, 0)))) +
-        theme_pitch() +
-        theme(legend.position = "none")
-      
-      
-    })
+    data
+  })
 
-    # Team Stats filtering as reactive variable
-    my_team <- reactive({
-      data <- footy_match_play %>%
-        mutate(goalAttack = ifelse(isGoal == 1 & Area == "Attack", 1, 0),
-               goalMidfield = ifelse(isGoal == 1 & Area == "Midfield", 1, 0),
-               goalDefence = ifelse(isGoal == 1 & Area == "Defence", 1, 0),
-               goalTurnover = ifelse(isGoal == 1 & firstEvent == "first touch", 1, 0),
-               goalRestart = ifelse(isGoal == 1 & firstEvent != "first touch", 1, 0)
-               )
-      
-      data
-    })
-
-    # Conditional display of Radio buttons on Team Stats
-    output$tsShowRB <- reactive({
+  # Conditional display of Radio buttons on Team Stats
+  output$tsShowRB <- reactive({
       listGraphs[[input$tsAttribute]]$type
-    })
-    
-    # Conditional display of Radio buttons on Age Stats
-    output$asShowRB <- reactive({
-      listGraphs[[input$asAttribute]]$type
-    })
-    
-    # Make sure elements stay active
-    outputOptions(output, "tsShowRB", suspendWhenHidden = FALSE)
-    outputOptions(output, "asShowRB", suspendWhenHidden = FALSE) 
-    
-    # Display Team statistics
-    output$teamPlot <- renderPlot({
+  })
+  # Make sure element stay active
+  outputOptions(output, "tsShowRB", suspendWhenHidden = FALSE)
 
-     # Roll to game level
-     game_level <- my_team() %>% filter(playNumber > 0) %>%
+  # Display Team statistics
+  output$teamPlot <- renderPlot({
+
+    # Roll to game level
+    game_level <- my_team() %>% filter(playNumber > 0) %>%
          mutate(gameDate = substr(gameDate, 1, 10)) %>%
          group_by(gameID, matchName, playByUs, gameDate) %>%
          summarise_if(is.numeric, list(sum), na.rm = TRUE) %>%
@@ -763,190 +701,205 @@ server <- function(input, output) {
                 defenceVelocity = defenceDistance/(DefenceDuration)
                 )
        
-       # Record which games were won, lost, drawn to change
-       # colour of match text (black = Draw, Red = Loss, Blue = Win)
-       HomeWins <- game_level  %>% 
+    # Record which games were won, lost, drawn to change
+    # colour of match text (black = Draw, Red = Loss, Blue = Win)
+    HomeWins <- game_level  %>% 
          group_by(matchName, gameDate)  %>%
          summarise(wld = case_when(sum(ifelse(playByUs=="true", isGoal, 0))==sum(ifelse(playByUs=="false", isGoal, 0)) ~ 2,
                                        sum(ifelse(playByUs=="true", isGoal, 0)) < sum(ifelse(playByUs=="false", isGoal, 0)) ~ 1,
                                            TRUE ~ 3)) 
-       myPalette <- c("red", "black", "blue")
+    myPalette <- c("red", "black", "blue")
        
-      # Are both counts and proportions allowed?
-      if (listGraphs[[input$tsAttribute]]$type != "count") {
+    # Are both counts and proportions allowed?
+    if (listGraphs[[input$tsAttribute]]$type != "count") {
       p = ggplot(game_level %>% 
-               gather(key = "Key", value = "Measurement",
-                      listGraphs[[input$tsAttribute]]$columns),
-               aes(x=reorder(matchName, gameDate, FUN=max), y= Measurement, 
-               fill = factor(Key, ordered = TRUE,
-                             levels = listGraphs[[input$tsAttribute]]$levels,
-                             labels = listGraphs[[input$tsAttribute]]$labels) 
-             ) ) + 
-        geom_bar(position = input$tsType, stat = "identity") +
-        scale_fill_discrete(name="") +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1,
-                                         color=myPalette[unlist(HomeWins[order(HomeWins$gameDate), 3])]),
-              plot.title = element_text(hjust=0.5),
-              legend.position = "bottom") + 
-        labs(x = "Team", y = listGraphs[[input$tsAttribute]]$ylab, 
-             title = listGraphs[[input$tsAttribute]]$title,
-             legend = "") +
-        # Print Us and Opposition on same graph as facets
-        facet_grid(rows = vars(factor(playByUs,
-                                      ordered = TRUE,
-                               levels = c("true", "false"),
-                               labels = c("Us", "Opponents"))) )
-        if (input$tsType == "fill") {
-          p + scale_y_continuous(labels = percent_format(accuracy = 1))
-        } else {
-          p
-        }  
-      
-        # Otherwise only counts are shown
-      } else {
-          ggplot(game_level %>% 
                  gather(key = "Key", value = "Measurement",
                         listGraphs[[input$tsAttribute]]$columns),
                  aes(x=reorder(matchName, gameDate, FUN=max), y= Measurement, 
-                     fill = factor(Key, ordered = TRUE,
-                                   levels = listGraphs[[input$tsAttribute]]$levels,
-                                   labels = listGraphs[[input$tsAttribute]]$labels) 
-                 ) ) + 
-          geom_bar(position = "stack", stat = "identity") +
-          scale_fill_discrete(name="") +
-          theme(axis.text.x = element_text(angle = 45, hjust = 1,
-                                           color=myPalette[unlist(HomeWins[order(HomeWins$gameDate), 3])]),
-                plot.title = element_text(hjust=0.5),
-                legend.position = "none") + 
-          labs(x = "Team", y = listGraphs[[input$tsAttribute]]$ylab, 
-               title = listGraphs[[input$tsAttribute]]$title,
-               legend = "") +
-          facet_grid(rows = vars(factor(playByUs,
-                                        ordered = TRUE,
-                                        levels = c("true", "false"),
-                                        labels = c("Us", "Opponents"))) )
-      }
-     })
-    
-    output$agePlot <- renderPlot({
-      game_level <- footy_match_age 
-      
-      # If Proportions and Counts allowed, print here
-      # with a legend
-      if (listGraphs[[input$asAttribute]]$type != "count") {
-        p = ggplot(game_level %>% 
-                 gather(key = "Key", value = "Measurement",
-                        listGraphs[[input$asAttribute]]$columns),
-               aes(x=age_group, y= Measurement, 
-                   fill = factor(Key, ordered = TRUE,
-                                 levels = listGraphs[[input$asAttribute]]$levels,
-                                 labels = listGraphs[[input$asAttribute]]$labels) 
-               ) ) + 
-          geom_bar(position = input$asType, stat = "identity") +
-          scale_fill_discrete(name="") +
-          theme(axis.text.x = element_text(angle = 45, hjust = 1),
-                plot.title = element_text(hjust=0.5),
-                legend.position = "bottom") + 
-          labs(x = "Age Group", y = listGraphs[[input$asAttribute]]$ylab, 
-               title = listGraphs[[input$asAttribute]]$title,
-               legend = "") +
-          facet_grid(rows = vars(factor(playByUs,
-                                        ordered = TRUE,
-                                        levels = c("true", "false"),
-                                        labels = c("Us", "Opponents"))) )
-        if (input$asType == "fill") {
-          p + scale_y_continuous(labels = percent_format(accuracy = 1))
-        } else {
-          p
-        }
-        # Else, graph just counts and no legend required 
+                 fill = factor(Key, ordered = TRUE,
+                               levels = listGraphs[[input$tsAttribute]]$levels,
+                               labels = listGraphs[[input$tsAttribute]]$labels) 
+                    ) 
+                 ) + 
+            geom_bar(position = input$tsType, stat = "identity") +
+            scale_fill_discrete(name="") +
+            theme(axis.text.x = element_text(angle = 45, hjust = 1,
+                                             color=myPalette[unlist(HomeWins[order(HomeWins$gameDate), 3])]),
+                  plot.title = element_text(hjust=0.5),
+                  legend.position = "bottom") + 
+            labs(x = "Team", y = listGraphs[[input$tsAttribute]]$ylab, 
+                 title = listGraphs[[input$tsAttribute]]$title,
+                 legend = "") +
+            # Print Us and Opposition on same graph as facets
+            facet_grid(rows = vars(factor(playByUs,
+                                          ordered = TRUE,
+                                   levels = c("true", "false"),
+                                   labels = c("Us", "Opponents"))) )
+
+      if (input$tsType == "fill") {
+        p + scale_y_continuous(labels = percent_format(accuracy = 1))
       } else {
-        ggplot(game_level %>% 
+        p
+      }  
+      
+    # Otherwise only counts are shown
+    } else {
+      ggplot(game_level %>% 
+             gather(key = "Key", value = "Measurement",
+                    listGraphs[[input$tsAttribute]]$columns),
+             aes(x=reorder(matchName, gameDate, FUN=max), y= Measurement, 
+                 fill = factor(Key, ordered = TRUE,
+                               levels = listGraphs[[input$tsAttribute]]$levels,
+                               labels = listGraphs[[input$tsAttribute]]$labels) 
+             ) ) + 
+             geom_bar(position = "stack", stat = "identity") +
+             scale_fill_discrete(name="") +
+             theme(axis.text.x = element_text(angle = 45, hjust = 1,
+                                              color=myPalette[unlist(HomeWins[order(HomeWins$gameDate), 3])]),
+                   plot.title = element_text(hjust=0.5),
+                   legend.position = "none") + 
+             labs(x = "Team", y = listGraphs[[input$tsAttribute]]$ylab, 
+                  title = listGraphs[[input$tsAttribute]]$title,
+                  legend = "") +
+             facet_grid(rows = vars(factor(playByUs,
+                                           ordered = TRUE,
+                                           levels = c("true", "false"),
+                                           labels = c("Us", "Opponents"))) )
+    }
+    
+  })
+  
+  # Dashboard 5 - Age Statistics
+  # ----------------------------
+  # Conditional display of Radio buttons on Age Stats
+  output$asShowRB <- reactive({
+    listGraphs[[input$asAttribute]]$type
+  })
+  # Make sure element stay active
+  outputOptions(output, "asShowRB", suspendWhenHidden = FALSE)
+  
+  output$agePlot <- renderPlot({
+    game_level <- footy_match_age 
+      
+    # If Proportions and Counts allowed, print here
+    # with a legend
+    if (listGraphs[[input$asAttribute]]$type != "count") {
+      p = ggplot(game_level %>% 
                  gather(key = "Key", value = "Measurement",
                         listGraphs[[input$asAttribute]]$columns),
-               aes(x=age_group, y= Measurement, 
-                   fill = factor(Key, ordered = TRUE,
-                                 levels = listGraphs[[input$asAttribute]]$levels,
-                                 labels = listGraphs[[input$asAttribute]]$labels) 
-               ) ) + 
-          geom_bar(position = "stack", stat = "identity") +
-          scale_fill_discrete(name="") +
-          theme(axis.text.x = element_text(angle = 45, hjust = 1),
-                plot.title = element_text(hjust=0.5),
-                legend.position = "none") + 
-          labs(x = "Age Group", y = listGraphs[[input$asAttribute]]$ylab, 
-               title = listGraphs[[input$asAttribute]]$title,
-               legend = "") +
-          facet_grid(rows = vars(factor(playByUs,
-                                        ordered = TRUE,
-                                        levels = c("true", "false"),
-                                        labels = c("Us", "Opponents"))) )
+                 aes(x=age_group, y= Measurement, 
+                     fill = factor(Key, ordered = TRUE,
+                                   levels = listGraphs[[input$asAttribute]]$levels,
+                                   labels = listGraphs[[input$asAttribute]]$labels) 
+                 ) ) + 
+                 geom_bar(position = input$asType, stat = "identity") +
+                 scale_fill_discrete(name="") +
+                 theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                       plot.title = element_text(hjust=0.5),
+                       legend.position = "bottom") + 
+                 labs(x = "Age Group", y = listGraphs[[input$asAttribute]]$ylab, 
+                      title = listGraphs[[input$asAttribute]]$title,
+                      legend = "") +
+                 facet_grid(rows = vars(factor(playByUs,
+                                               ordered = TRUE,
+                                               levels = c("true", "false"),
+                                               labels = c("Us", "Opponents"))) )
+      if (input$asType == "fill") {
+        p + scale_y_continuous(labels = percent_format(accuracy = 1))
+      } else {
+        p
       }
-    })
+    # Else, graph just counts and no legend required 
+    } else {
+      ggplot(game_level %>% 
+             gather(key = "Key", value = "Measurement",
+                    listGraphs[[input$asAttribute]]$columns),
+             aes(x=age_group, y= Measurement, 
+                 fill = factor(Key, ordered = TRUE,
+                               levels = listGraphs[[input$asAttribute]]$levels,
+                               labels = listGraphs[[input$asAttribute]]$labels) 
+             ) ) + 
+             geom_bar(position = "stack", stat = "identity") +
+             scale_fill_discrete(name="") +
+             theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                   plot.title = element_text(hjust=0.5),
+                   legend.position = "none") + 
+             labs(x = "Age Group", y = listGraphs[[input$asAttribute]]$ylab, 
+                  title = listGraphs[[input$asAttribute]]$title,
+                  legend = "") +
+             facet_grid(rows = vars(factor(playByUs,
+                                           ordered = TRUE,
+                                           levels = c("true", "false"),
+                                           labels = c("Us", "Opponents"))) )
+    }
+  })
     
-   output$gamePlot <- renderPlot({
-     print(input$gsType)
-     data <- FootyGames %>% filter(matchName == input$gsMatch)
-     if (input$gsType != "all") {
-       if (input$gsType == "defPossession") {
-         print("Defense")
-         data <- data %>%
-           gather(key = "TeamPossession", value = "TimePossesion",
-                  ourDefensivePossession, theirDefensivePossession)
-       } else {
-         print("Attack")
-         data <- data  %>%
-           gather(key = "TeamPossession", value = "TimePossesion",
-                  ourAttackingPossession, theirAttackingPossession)
-       }
-       } else {
-         data <- data  %>%
-           gather(key = "TeamPossession", value = "TimePossesion",
-                  ourPossession, theirPossession)
+  # Dashboard 6 - Game Possession
+  # -----------------------------
+  output$gamePlot <- renderPlot({
+    data <- FootyGames %>% filter(matchName == input$gsMatch)
+    if (input$gsType != "all") {
+      if (input$gsType == "defPossession") {
+        data <- data %>%
+                gather(key = "TeamPossession", value = "TimePossesion",
+                       ourDefensivePossession, theirDefensivePossession)
+      } else {
+        data <- data  %>%
+                gather(key = "TeamPossession", value = "TimePossesion",
+                       ourAttackingPossession, theirAttackingPossession)
+      }
+    } else {
+      data <- data  %>%
+              gather(key = "TeamPossession", value = "TimePossesion",
+                     ourPossession, theirPossession)
          
-       }
+    }
      
-     ggplot(data ,
-            aes(x=epochTime, y= TimePossesion, colour=TeamPossession)) +
-       geom_line() 
-   })
+    ggplot(data ,
+           aes(x=epochTime, y= TimePossesion, colour=TeamPossession)) +
+           geom_line() 
+  })
    
-   my_cluster <- reactive({
+  # Dashboard 7 - Clustering
+  # ------------------------
+  # Create Reactive variable first to do filtering
+  my_cluster <- reactive({
      
-     # Filter on competitions to cluster
-     if (input$cpTopFlight) {
-     ftc_data <- ftc_cluster %>%   
-       filter(competition %in% c(top_flight_comps, our_comp))
-     } else {
-       ftc_data <- ftc_cluster %>%   
-         filter(competition %in% c(our_comp))
-     }       
-     print(top_flight_comps)
-     ftc_data
-   })
+    # Filter on competitions to cluster
+    if (input$cpTopFlight) {
+      ftc_data <- ftc_cluster %>%   
+                  filter(competition %in% c(top_flight_comps, our_comp))
+    } else {
+      ftc_data <- ftc_cluster %>%   
+                  filter(competition %in% c(our_comp))
+    }
+    ftc_data
+  })
    
-   output$PCAPlot <- renderPlot({
+  # Then feed to PCA and display
+  output$PCAPlot <- renderPlot({
+    
+    # Principal Component processing on numeric fields 
+    ftpca.pr <- prcomp(my_cluster()[, -c(1:4)], center = TRUE, scale = TRUE)
      
-     ftpca.pr <- prcomp(my_cluster()[, -c(1:4)], center = TRUE, scale = TRUE)
+    # Get the variable contributions that make up PCA
+    res.var <- get_pca_var(ftpca.pr)
      
-     # Get the variable contributions that make up PCA
-     res.var <- get_pca_var(ftpca.pr)
+    # Take 1st 2 dimensions
+    pca_vars <- data.frame(pca_1 = res.var$coord[, 1], 
+                           pca_2 = res.var$coord[, 2],
+                           variable = rownames(res.var$coord)
+                          )
      
-     # Take 1st 2 dimensions
-     pca_vars <- data.frame(pca_1 = res.var$coord[, 1], 
-                            pca_2 = res.var$coord[, 2],
-                            variable = rownames(res.var$coord)
-     )
-     
-     # Work out distance and those furthest away will be shown 
-     pca_vars$distance <- pca_vars$pca_1 ^ 2 + pca_vars$pca_2 ^ 2
-     pca_vars <- pca_vars %>% ungroup() %>%
-       arrange(-distance) %>%
-       mutate(ranking = row_number())
-     top20 = pca_vars[pca_vars$ranking <= 20, ]$variable 
-     print(nrow(my_cluster()))
-     # Plot the 2-d PCA Plot plus important features
-     p = fviz_pca_biplot(ftpca.pr, geom = c("point", "text"),
+    # Work out distance and those furthest away will be shown 
+    pca_vars$distance <- pca_vars$pca_1 ^ 2 + pca_vars$pca_2 ^ 2
+    pca_vars <- pca_vars %>% ungroup() %>%
+                arrange(-distance) %>%
+                mutate(ranking = row_number())
+                       top20 = pca_vars[pca_vars$ranking <= 20, ]$variable 
+
+    # Plot the 2-d PCA Plot plus important features
+    p = fviz_pca_biplot(ftpca.pr, geom = c("point", "text"),
                      geom.var = c("text"),
                      geom.ind = c("point"),
                      select.var = list(name=top20),
@@ -961,51 +914,50 @@ server <- function(input, output) {
                      alpha.var = 0.1, 
                      repel = TRUE,
                      mean.point = FALSE)+
-       theme_minimal()+
-       labs(fill = "Team")
+        theme_minimal()+
+        labs(fill = "Team")
        
-       if (input$cpDisplay == "ind") {
-         p
-       } else {
-         p + 
-         geom_text_repel(aes(label=my_cluster()$teamName), 
-                       box.padding = 0.1, point.padding =0.1, 
-                       segment.color = 'grey50', seed = 13,
-                       size=3.5) 
-       }
+    if (input$cpDisplay == "ind") {
+      p
+    } else {
+      p + 
+      geom_text_repel(aes(label=my_cluster()$teamName), 
+                      box.padding = 0.1, point.padding =0.1, 
+                      segment.color = 'grey50', seed = 13,
+                      size=3.5) 
+    }
      
-   })
+  })
    
-   # Clustering - Hierarchy Tab
-   output$HierPlot <- renderPlot({
+  # Clustering - Hierarchy Tab
+  output$HierPlot <- renderPlot({
      
-     m<-as.matrix(my_cluster()[ -c(1:4)])
-     rownames(m) <- my_cluster()$teamName
-     # Scale all columns so each feature has equal importance in distance
-     m <- scale(m)
+    m<-as.matrix(my_cluster()[ -c(1:4)])
+    rownames(m) <- my_cluster()$teamName
+    # Scale all columns so each feature has equal importance in distance
+    m <- scale(m)
      
-     # Create Cosine Distance Function
-     cosineSim <- function(x){
-       as.dist(x%*%t(x)/(sqrt(rowSums(x^2) %*% t(rowSums(x^2)))))
-     }
-     # Compute cosine distance of each team
-     cs <- cosineSim(m)
-     cd <- 1-cs
+    # Create Cosine Distance Function
+    cosineSim <- function(x){
+      as.dist(x%*%t(x)/(sqrt(rowSums(x^2) %*% t(rowSums(x^2)))))
+    }
+    # Compute cosine distance of each team
+    cs <- cosineSim(m)
+    cd <- 1-cs
 
-     # For Agglomerative Hierarchical Clustering,
-     # create groups to display
-     groups <- hclust(cd,method="ward.D")
-     # Visualize hierarchical clustering
-     # Again 3 groups
-     fviz_dend(groups, k = 3, 
-               cex = 0.8, 
-               main = "2019 NSFA 1 Girls Under 16",
-               labels_track_height=3,
-               horiz= TRUE, rect = TRUE # Add rectangle around groups
-              )
+    # For Agglomerative Hierarchical Clustering,
+    # create groups to display
+    groups <- hclust(cd,method="ward.D")
+    # Visualize hierarchical clustering
+    # Again 3 groups
+    fviz_dend(groups, k = 3, 
+              cex = 0.8, 
+              main = our_comp,
+              labels_track_height=3,
+              horiz= TRUE, rect = TRUE # Add rectangle around groups
+             )
      
-   })
-   
+  })
     
 }
 
